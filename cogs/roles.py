@@ -214,7 +214,8 @@ class RoleEntryPickerView(discord.ui.View):
                 color_key=self.selected_color,
             )
         )
-        await interaction.response.edit_message(content='✅ Eintrag hinzugefügt.', view=None)
+        await interaction.response.defer()
+        await interaction.followup.send('✅ Eintrag hinzugefügt.', ephemeral=True)
         await self.builder.refresh()
         self.stop()
 
