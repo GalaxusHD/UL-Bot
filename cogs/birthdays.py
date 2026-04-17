@@ -63,6 +63,8 @@ class BirthdayModal(discord.ui.Modal, title='Geburtstag eintragen'):
 
         parts = raw_name.split(maxsplit=1)
         entered_username = parts[0]
+        if not entered_username.startswith('@'):
+            entered_username = f'@{entered_username}'
         own_username = f'@{interaction.user.name}'
         entered_username_key = entered_username.lstrip('@').casefold()
         own_username_key = own_username.lstrip('@').casefold()
@@ -333,7 +335,7 @@ class Birthdays(commands.Cog):
                 day = int(row['day'])
                 month = int(row['month'])
                 year = int(row['year']) if row['year'] is not None else None
-                display_name = username if username.startswith('@') else f'@{username}'
+                display_name = username
 
                 date_text = f'{day:02d}.{month:02d}'
                 if year is not None:
