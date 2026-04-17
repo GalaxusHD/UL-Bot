@@ -21,6 +21,10 @@ STANDARD_EMOJIS = [
     '🔴', '⚫', '⚪', '🟤', '1️⃣', '2️⃣', '3️⃣', '4️⃣', '5️⃣', '6️⃣', '7️⃣', '8️⃣', '9️⃣',
 ]
 
+def pink_role_color() -> discord.Color:
+    return discord.Color.from_rgb(255, 105, 180)
+
+
 ROLE_COLORS = [
     ('blurple', 'Blurple', discord.Color.blurple),
     ('red', 'Red', discord.Color.red),
@@ -30,7 +34,7 @@ ROLE_COLORS = [
     ('purple', 'Purple', discord.Color.purple),
     ('orange', 'Orange', discord.Color.orange),
     ('greyple', 'Greyple', discord.Color.greyple),
-    ('pink', 'Pink', lambda: discord.Color.from_rgb(255, 105, 180)),
+    ('pink', 'Pink', pink_role_color),
     ('teal', 'Teal', discord.Color.teal),
 ]
 ROLE_COLOR_LABELS = {key: label for key, label, _ in ROLE_COLORS}
@@ -97,7 +101,7 @@ class RoleEntryPickerView(discord.ui.View):
         self.builder = builder
         self.selected_role: discord.Role | None = None
         self.selected_emoji: str | None = None
-        self.selected_color: str = draft.entries[-1].color_key if draft.entries else 'blurple'
+        self.selected_color: str = 'blurple'
         self.source: str = 'standard'
         self.page: int = 0
         self._rebuild_components()
