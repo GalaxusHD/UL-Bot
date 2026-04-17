@@ -67,7 +67,7 @@ class BirthdayModal(discord.ui.Modal, title='Geburtstag eintragen'):
         entered_username_key = entered_username.lstrip('@').casefold()
         own_username_key = own_username.lstrip('@').casefold()
         if interaction.user.guild_permissions.administrator and entered_username_key != own_username_key:
-            username = entered_username
+            username = entered_username.lower()
             storage_user_id = self.cog.make_storage_user_id(guild_id=interaction.guild.id, username=username)
         else:
             username = own_username.lower()
