@@ -30,6 +30,7 @@ MONTH_NAMES = {
     11: 'November',
     12: 'Dezember',
 }
+MAX_STORAGE_ID_ATTEMPTS = 100
 
 
 class BirthdayModal(discord.ui.Modal, title='Geburtstag eintragen'):
@@ -276,20 +277,22 @@ class Birthdays(commands.Cog):
             return existing_user_id
 
         username_key = self._username_key(username)
-        attempt = 0
-        while True:
-            digest = sha256(f'{guild_id}:{username_key}:{attempt}'.encode('utf-8')).digest()
-            raw_value = int.from_bytes(digest[:8], byteorder='big', signed=False) & ((1 << 63) - 1)
-            synthetic_user_id = -max(1, raw_value)
-
-            with self._conn() as conn:
+        with self._conn() as conn:
+            for attempt in range(MAX_STORAGE_ID_ATTEMPTS):
+                digest = sha256(f'{guild_id}:{username_key}:{attempt}'.encode('utf-8')).digest()
+                # 62-bit mask keeps the synthetic ID safely within SQLite signed INTEGER range after negation.
+                raw_value = int.from_bytes(digest[:8], byteorder='big', signed=False) & ((1 << 62) - 1)
+                synthetic_user_id = -max(1, raw_value)
                 row = conn.execute(
                     'SELECT user_id FROM birthdays WHERE guild_id = ? AND user_id = ? LIMIT 1',
                     (guild_id, synthetic_user_id),
                 ).fetchone()
-            if row is None:
-                return synthetic_user_id
-            attempt += 1
+                if row is None:
+                    return synthetic_user_id
+
+        raise RuntimeError(
+            f'Konnte keine eindeutige Storage-ID für den Benutzernamen {username} in Guild {guild_id} erzeugen.'
+        )
 
     @staticmethod
     def _calculate_correct_age(birth_day: int, birth_month: int, birth_year: int, today: date) -> int:
