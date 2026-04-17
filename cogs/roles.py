@@ -96,6 +96,7 @@ class RolePickerView(discord.ui.View):
     def _rebuild_emoji_select(self) -> None:
         previous_role = self.selected_role
         self.clear_items()
+        self.switch_source_button.label = f"Source: {'Standard' if self.source == 'standard' else 'Custom'}"
         self.add_item(RolePickerRoleSelect())
         items = self.source_items
         if not items:
@@ -250,8 +251,8 @@ class RoleBuilderView(discord.ui.View):
         for entry in self.draft.entries:
             self.cog.db.add_role_panel_entry(panel_id=panel_id, role_id=entry.role_id, emoji=entry.emoji)
 
-        for child in self.children:
-            child.disabled = True
+        for component in self.children:
+            component.disabled = True
         await interaction.response.edit_message(content=f"{self.render_content()}\n\nPublished: {message.jump_url}", view=self)
         self.stop()
 
@@ -312,7 +313,8 @@ class Roles(commands.Cog):
 
     @commands.Cog.listener()
     async def on_raw_reaction_add(self, payload: discord.RawReactionActionEvent) -> None:
-        if payload.user_id == self.bot.user.id:
+        bot_user = self.bot.user
+        if bot_user is not None and payload.user_id == bot_user.id:
             return
         panel = self.db.get_role_panel_by_message_id(payload.message_id)
         if panel is None:
