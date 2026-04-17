@@ -21,6 +21,25 @@ STANDARD_EMOJIS = [
     '🔴', '⚫', '⚪', '🟤', '1️⃣', '2️⃣', '3️⃣', '4️⃣', '5️⃣', '6️⃣', '7️⃣', '8️⃣', '9️⃣',
 ]
 
+def pink_role_color() -> discord.Color:
+    return discord.Color.from_rgb(255, 105, 180)
+
+
+ROLE_COLORS = [
+    ('blurple', 'Blurple', discord.Color.blurple),
+    ('red', 'Red', discord.Color.red),
+    ('green', 'Green', discord.Color.green),
+    ('blue', 'Blue', discord.Color.blue),
+    ('gold', 'Gold', discord.Color.gold),
+    ('purple', 'Purple', discord.Color.purple),
+    ('orange', 'Orange', discord.Color.orange),
+    ('greyple', 'Greyple', discord.Color.greyple),
+    ('pink', 'Pink', pink_role_color),
+    ('teal', 'Teal', discord.Color.teal),
+]
+ROLE_COLOR_LABELS = {key: label for key, label, _ in ROLE_COLORS}
+ROLE_COLOR_RESOLVERS = {key: resolver for key, _, resolver in ROLE_COLORS}
+
 
 def normalise_emoji(emoji_value: str) -> tuple[str, str]:
     emoji_value = emoji_value.strip()
@@ -42,6 +61,7 @@ class DraftRoleEntry:
     role_id: int
     emoji_key: str
     display_emoji: str
+    color_key: str = 'blurple'
 
 
 @dataclass(slots=True)
@@ -81,6 +101,7 @@ class RoleEntryPickerView(discord.ui.View):
         self.builder = builder
         self.selected_role: discord.Role | None = None
         self.selected_emoji: str | None = None
+        self.selected_color: str = 'blurple'
         self.source: str = 'standard'
         self.page: int = 0
         self._rebuild_components()
@@ -115,11 +136,13 @@ class RoleEntryPickerView(discord.ui.View):
             ]
         self.add_item(RoleEntryEmojiSelect(options=options))
         self.add_item(self.switch_source_button)
+        self.add_item(self.color_button)
         self.add_item(self.prev_page_button)
         self.add_item(self.next_page_button)
         self.add_item(self.save_button)
         self.add_item(self.cancel_button)
         self.switch_source_button.label = f'Emoji-Quelle: {'Standard' if self.source == 'standard' else 'Server'}'
+        self.color_button.label = f'Farbe: {ROLE_COLOR_LABELS.get(self.selected_color, "Blurple")}'
 
         if previous_role is not None:
             self.selected_role = previous_role
@@ -128,6 +151,20 @@ class RoleEntryPickerView(discord.ui.View):
     async def switch_source_button(self, interaction: discord.Interaction, _: discord.ui.Button['RoleEntryPickerView']) -> None:
         self.source = 'custom' if self.source == 'standard' else 'standard'
         self.page = 0
+        self._rebuild_components()
+        await interaction.response.edit_message(
+            content=f'Rolle + Emoji wählen (Seite {self.page + 1}/{self.page_count})',
+            view=self,
+        )
+
+    @discord.ui.button(label='Farbe: Blurple', style=discord.ButtonStyle.secondary, row=2)
+    async def color_button(self, interaction: discord.Interaction, _: discord.ui.Button['RoleEntryPickerView']) -> None:
+        keys = [key for key, _, _ in ROLE_COLORS]
+        try:
+            next_index = (keys.index(self.selected_color) + 1) % len(keys)
+        except ValueError:
+            next_index = 0
+        self.selected_color = keys[next_index]
         self._rebuild_components()
         await interaction.response.edit_message(
             content=f'Rolle + Emoji wählen (Seite {self.page + 1}/{self.page_count})',
@@ -170,7 +207,12 @@ class RoleEntryPickerView(discord.ui.View):
             return
 
         self.draft.entries.append(
-            DraftRoleEntry(role_id=self.selected_role.id, emoji_key=emoji_key, display_emoji=display_emoji)
+            DraftRoleEntry(
+                role_id=self.selected_role.id,
+                emoji_key=emoji_key,
+                display_emoji=display_emoji,
+                color_key=self.selected_color,
+            )
         )
         await interaction.response.edit_message(content='✅ Eintrag hinzugefügt.', view=None)
         await self.builder.refresh()
@@ -200,7 +242,10 @@ class RolePanelBuilderView(discord.ui.View):
         else:
             lines.append('Aktuelle Rollen:')
             for entry in self.draft.entries:
-                lines.append(f'- {entry.display_emoji} <@&{entry.role_id}>')
+                lines.append(
+                    f'- {entry.display_emoji} <@&{entry.role_id}> '
+                    f'({ROLE_COLOR_LABELS.get(entry.color_key, "Blurple")})'
+                )
         return '\n'.join(lines)
 
     async def refresh(self) -> None:
@@ -298,6 +343,7 @@ class Roles(commands.Cog):
             rows = conn.execute(
                 '''
                 SELECT role_id, emoji, display_emoji
+                     , COALESCE(color, 'blurple') AS color
                 FROM role_message_roles
                 WHERE role_message_id = ?
                 ORDER BY position ASC
@@ -305,7 +351,12 @@ class Roles(commands.Cog):
                 (role_message_id,),
             ).fetchall()
         return [
-            DraftRoleEntry(role_id=int(row['role_id']), emoji_key=str(row['emoji']), display_emoji=str(row['display_emoji']))
+            DraftRoleEntry(
+                role_id=int(row['role_id']),
+                emoji_key=str(row['emoji']),
+                display_emoji=str(row['display_emoji']),
+                color_key=str(row['color']),
+            )
             for row in rows
         ]
 
@@ -314,7 +365,10 @@ class Roles(commands.Cog):
         embed = discord.Embed(
             title=draft.title,
             description='\n'.join(f'{entry.display_emoji} • <@&{entry.role_id}>' for entry in draft.entries),
-            color=discord.Color.blurple(),
+            color=ROLE_COLOR_RESOLVERS.get(
+                draft.entries[0].color_key if draft.entries else 'blurple',
+                discord.Color.blurple,
+            )(),
         )
         embed.set_footer(text='Reagiere, um Rollen zu erhalten oder zu entfernen.')
         return embed
@@ -363,10 +417,10 @@ class Roles(commands.Cog):
             for position, entry in enumerate(draft.entries, start=1):
                 cursor.execute(
                     '''
-                    INSERT INTO role_message_roles (role_message_id, role_id, emoji, display_emoji, position)
-                    VALUES (?, ?, ?, ?, ?)
+                    INSERT INTO role_message_roles (role_message_id, role_id, emoji, display_emoji, color, position)
+                    VALUES (?, ?, ?, ?, ?, ?)
                     ''',
-                    (role_message_id, entry.role_id, entry.emoji_key, entry.display_emoji, position),
+                    (role_message_id, entry.role_id, entry.emoji_key, entry.display_emoji, entry.color_key, position),
                 )
             conn.commit()
 
@@ -383,10 +437,17 @@ class Roles(commands.Cog):
             for position, entry in enumerate(draft.entries, start=1):
                 cursor.execute(
                     '''
-                    INSERT INTO role_message_roles (role_message_id, role_id, emoji, display_emoji, position)
-                    VALUES (?, ?, ?, ?, ?)
+                    INSERT INTO role_message_roles (role_message_id, role_id, emoji, display_emoji, color, position)
+                    VALUES (?, ?, ?, ?, ?, ?)
                     ''',
-                    (draft.role_message_id, entry.role_id, entry.emoji_key, entry.display_emoji, position),
+                    (
+                        draft.role_message_id,
+                        entry.role_id,
+                        entry.emoji_key,
+                        entry.display_emoji,
+                        entry.color_key,
+                        position,
+                    ),
                 )
             conn.commit()
 

@@ -7,6 +7,7 @@ ALLOWED_COLUMN_DEFINITIONS = {
     'TEXT',
     'INTEGER',
     'INTEGER NOT NULL DEFAULT 1',
+    "TEXT NOT NULL DEFAULT 'blurple'",
 }
 TABLE_INFO_SQL = {
     'birthdays': 'PRAGMA table_info(birthdays)',
@@ -32,6 +33,8 @@ ALTER_COLUMN_SQL = {
         'ALTER TABLE text_messages ADD COLUMN message_content TEXT',
     ('text_messages', 'message_content', "TEXT NOT NULL DEFAULT ''"):
         "ALTER TABLE text_messages ADD COLUMN message_content TEXT NOT NULL DEFAULT ''",
+    ('role_message_roles', 'color', "TEXT NOT NULL DEFAULT 'blurple'"):
+        "ALTER TABLE role_message_roles ADD COLUMN color TEXT NOT NULL DEFAULT 'blurple'",
 }
 
 
@@ -141,12 +144,14 @@ def init_database() -> None:
             role_id INTEGER NOT NULL,
             emoji TEXT NOT NULL,
             display_emoji TEXT NOT NULL,
+            color TEXT NOT NULL DEFAULT 'blurple',
             position INTEGER NOT NULL,
             FOREIGN KEY (role_message_id) REFERENCES role_messages(id) ON DELETE CASCADE,
             UNIQUE(role_message_id, emoji)
         )
         '''
     )
+    _ensure_column(cursor, 'role_message_roles', 'color', "TEXT NOT NULL DEFAULT 'blurple'")
 
     cursor.execute('CREATE INDEX IF NOT EXISTS idx_birthdays_date ON birthdays (month, day)')
     cursor.execute('CREATE INDEX IF NOT EXISTS idx_birthdays_lookup ON birthdays (guild_id, user_id)')

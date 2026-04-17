@@ -1,6 +1,6 @@
 import os
 import sqlite3
-from datetime import datetime
+from datetime import date, datetime
 
 import discord
 import pytz
@@ -15,6 +15,20 @@ ANNOUNCE_HOUR = 0
 ANNOUNCE_MINUTE = 0
 CLEANUP_HOUR = 23
 CLEANUP_MINUTE = 59
+MONTH_NAMES = {
+    1: 'Januar',
+    2: 'Februar',
+    3: 'März',
+    4: 'April',
+    5: 'Mai',
+    6: 'Juni',
+    7: 'Juli',
+    8: 'August',
+    9: 'September',
+    10: 'Oktober',
+    11: 'November',
+    12: 'Dezember',
+}
 
 
 class BirthdayModal(discord.ui.Modal, title='Geburtstag eintragen'):
@@ -122,7 +136,7 @@ class Birthdays(commands.Cog):
             await interaction.response.send_message('❌ Du brauchst Administrator-Rechte!', ephemeral=True)
             return
 
-        embed = self.build_birthday_embed(interaction.guild.id)
+        embed = self.build_birthday_embed(interaction.guild)
         message = await interaction.channel.send(embed=embed) if interaction.channel else None
 
         with self._conn() as conn:
@@ -194,39 +208,60 @@ class Birthdays(commands.Cog):
             )
             conn.commit()
 
-    def build_birthday_embed(self, guild_id: int) -> discord.Embed:
+    @staticmethod
+    def _calculate_correct_age(birth_day: int, birth_month: int, birth_year: int, today: date) -> int:
+        age = today.year - birth_year
+        if (today.month, today.day) < (birth_month, birth_day):
+            age -= 1
+        return max(age, 0)
+
+    def build_birthday_embed(self, guild: discord.Guild) -> discord.Embed:
         with self._conn() as conn:
             rows = conn.execute(
                 '''
-                SELECT username, real_name, day, month, year
+                SELECT user_id, username, real_name, day, month, year
                 FROM birthdays
                 WHERE guild_id = ?
                 ORDER BY month ASC, day ASC, COALESCE(real_name, username) COLLATE NOCASE ASC
                 ''',
-                (guild_id,),
+                (guild.id,),
             ).fetchall()
 
         if not rows:
             description = 'Keine Geburtstage eingetragen.'
         else:
             lines = []
-            current_year = datetime.now(self.timezone).year
+            today = datetime.now(self.timezone).date()
+            month_entries: dict[int, list[str]] = {month: [] for month in range(1, 13)}
             for row in rows:
                 username = str(row['username'])
                 real_name = str(row['real_name']) if row['real_name'] else None
                 day = int(row['day'])
                 month = int(row['month'])
                 year = int(row['year']) if row['year'] is not None else None
+                member = guild.get_member(int(row['user_id']))
+                fallback_name = username if username.startswith('@') else f'@{username}'
+                mention = member.mention if member is not None else f'{fallback_name} (left server)'
 
                 date_text = f'{day:02d}.{month:02d}'
                 if year is not None:
-                    age = max(current_year - year, 0)
+                    age = self._calculate_correct_age(day, month, year, today)
                     date_text = f'{date_text}.{year} (Alter: {age})'
 
+                line = f'• {mention} • {date_text}'
                 if real_name:
-                    lines.append(f'• {username} ({real_name}) — {date_text}')
-                else:
-                    lines.append(f'• {username} — {date_text}')
+                    line = f'{line} — {real_name}'
+                month_entries[month].append(line)
+
+            for month, month_name in MONTH_NAMES.items():
+                entries = month_entries.get(month, [])
+                if not entries:
+                    continue
+                lines.append(month_name)
+                lines.extend(entries)
+                lines.append('')
+            if lines and lines[-1] == '':
+                lines.pop()
             description = '\n'.join(lines)
 
         return discord.Embed(title='🎂 Geburtstagsliste', description=description, color=discord.Color.gold())
@@ -247,7 +282,7 @@ class Birthdays(commands.Cog):
 
         try:
             message = await channel.fetch_message(int(settings['list_message_id']))
-            await message.edit(embed=self.build_birthday_embed(guild.id))
+            await message.edit(embed=self.build_birthday_embed(guild))
         except (discord.NotFound, discord.Forbidden, discord.HTTPException):
             return
 
