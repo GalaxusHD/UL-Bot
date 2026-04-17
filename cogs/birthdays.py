@@ -70,7 +70,7 @@ class BirthdayModal(discord.ui.Modal, title='Geburtstag eintragen'):
             username = entered_username
             storage_user_id = self.cog.make_storage_user_id(guild_id=interaction.guild.id, username=username)
         else:
-            username = own_username
+            username = own_username.lower()
             storage_user_id = interaction.user.id
         real_name = parts[1].strip() if len(parts) > 1 and parts[1].strip() else None
 
