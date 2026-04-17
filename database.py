@@ -75,6 +75,8 @@ class Database:
                 (guild_id, channel_id, message_id, title, int(multi_role)),
             )
             connection.commit()
+            if cursor.lastrowid is None:
+                raise RuntimeError("Failed to create role panel row.")
             return int(cursor.lastrowid)
 
     def add_role_panel_entry(self, panel_id: int, role_id: int, emoji: str) -> None:
