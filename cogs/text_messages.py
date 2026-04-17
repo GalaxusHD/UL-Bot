@@ -200,11 +200,6 @@ class TextMessages(commands.Cog):
 
     @staticmethod
     def _parse_colour(colour: str | None) -> discord.Colour:
-        if colour:
-            normalised = colour.strip()
-            if re.fullmatch(r'#[0-9a-fA-F]{6}', normalised):
-                return discord.Colour(int(normalised[1:], 16))
-
         colour_map = {
             'red': discord.Colour.red(),
             'blue': discord.Colour.blue(),
@@ -309,7 +304,7 @@ class TextMessages(commands.Cog):
         channel: discord.TextChannel = None,
         embed: bool = False,
         colour: str = None
-    ): 
+    ):
         if interaction.guild is None:
             await interaction.response.send_message('❌ Dieser Befehl ist nur auf Servern verfügbar.', ephemeral=True)
             return
