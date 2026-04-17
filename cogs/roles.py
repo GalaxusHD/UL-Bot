@@ -333,17 +333,19 @@ class Roles(commands.Cog):
         if role is None:
             return
 
-        channel = guild.get_channel(panel_data.channel_id)
-        if not isinstance(channel, discord.TextChannel):
-            return
-        message = await channel.fetch_message(payload.message_id)
-
         if role in member.roles:
-            await member.remove_roles(role, reason="Role toggle reaction removed by second click")
+            channel = guild.get_channel(panel_data.channel_id)
+            if not isinstance(channel, discord.TextChannel):
+                return
+            message = await channel.fetch_message(payload.message_id)
             await message.remove_reaction(payload.emoji, member)
             return
 
         if not panel_data.multi_role:
+            channel = guild.get_channel(panel_data.channel_id)
+            if not isinstance(channel, discord.TextChannel):
+                return
+            message = await channel.fetch_message(payload.message_id)
             await self._remove_other_panel_roles(member=member, selected_role_id=role.id, entries=entries, message=message)
         await member.add_roles(role, reason="Role toggle reaction added")
 
