@@ -354,7 +354,7 @@ class TextMessages(commands.Cog):
                         colour=colour
                     )
                 )
-            
+
             elif action == 'edit':
                 if not normalized_title:
                     await interaction.response.send_message('❌ Für "edit" brauchst du einen Titel (Name/Identifier)!', ephemeral=True)
@@ -387,7 +387,7 @@ class TextMessages(commands.Cog):
                             initial_message=record['message_content']
                         )
                     )
-            
+
             elif action == 'delete':
                 if not normalized_title:
                     await interaction.response.send_message('❌ Für "delete" brauchst du einen Titel (Name/Identifier)!', ephemeral=True)
@@ -472,10 +472,10 @@ class TextMessages(commands.Cog):
                 )
                 embed.set_footer(text='Titel = Name/Identifier der Nachricht')
                 await interaction.response.send_message(embed=embed, ephemeral=True)
-            
+
             else:
                 await interaction.response.send_message('❌ Aktion muss "create", "edit", "delete" oder "list" sein!', ephemeral=True)
-        
+
         finally:
             conn.close()
 
