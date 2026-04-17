@@ -1,4 +1,3 @@
-import asyncio
 import re
 import sqlite3
 
@@ -7,478 +6,257 @@ from discord import app_commands
 from discord.ext import commands
 
 from database import DB_FILE
-MAX_MENTION_NAME_LENGTH = 32
-MEMBER_QUERY_LIMIT = 10
-MENTION_PATTERN = re.compile(r'<@!?(?P<id>\d+)>|(?<![\w.])@(?P<name>[A-Za-z0-9_.-]{{2,{max_len}}})\b'.format(
-    max_len=MAX_MENTION_NAME_LENGTH
-))
 
-
-class TextMessageModal(discord.ui.Modal):
-    def __init__(
-        self,
-        cog: 'TextMessages',
-        action: str,
-        message_title: str,
-        channel_id: int | None = None,
-        embed: bool = False,
-        colour: str | None = None,
-        initial_message: str | None = None
-    ):
-        super().__init__(title='Text-Nachricht eingeben')
-        self.cog = cog
-        self.action = action
-        self.message_title = message_title
-        self.channel_id = channel_id
-        self.embed = embed
-        self.colour = colour
-        self.message_input = discord.ui.TextInput(
-            label='Nachricht',
-            style=discord.TextStyle.paragraph,
-            required=True,
-            default=initial_message or ''
-        )
-        self.add_item(self.message_input)
-
-    async def on_submit(self, interaction: discord.Interaction):
-        if interaction.guild is None:
-            await interaction.response.send_message('❌ Dieser Befehl ist nur auf Servern verfügbar.', ephemeral=True)
-            return
-
-        if not interaction.user.guild_permissions.administrator:
-            await interaction.response.send_message('❌ Du brauchst Administrator-Rechte!', ephemeral=True)
-            return
-
-        await interaction.response.defer(ephemeral=True)
-
-        conn = sqlite3.connect(DB_FILE)
-        conn.row_factory = sqlite3.Row
-        cursor = conn.cursor()
-
-        try:
-            message = str(self.message_input.value).strip()
-            if not message:
-                await interaction.followup.send('❌ Nachricht darf nicht leer sein.', ephemeral=True)
-                return
-            formatted_message = await self.cog._convert_mentions_to_display(interaction.guild, message)
-
-            if self.action == 'create':
-                if self.channel_id is None:
-                    await interaction.followup.send('❌ Kein gültiger Channel für "create" übergeben.', ephemeral=True)
-                    return
-
-                cursor.execute(
-                    '''
-                    SELECT 1
-                    FROM text_messages
-                    WHERE guild_id = ? AND LOWER(title) = LOWER(?)
-                    LIMIT 1
-                    ''',
-                    (interaction.guild.id, self.message_title)
-                )
-                if cursor.fetchone() is not None:
-                    await interaction.followup.send(
-                        f'❌ Nachricht "{self.message_title}" existiert bereits!',
-                        ephemeral=True
-                    )
-                    return
-
-                target_channel = await self.cog._resolve_text_channel(interaction.guild, self.channel_id)
-                if target_channel is None:
-                    await interaction.followup.send('❌ Channel nicht gefunden oder nicht zugreifbar.', ephemeral=True)
-                    return
-
-                if self.embed:
-                    embed_message = discord.Embed(
-                        description=formatted_message,
-                        color=self.cog._parse_colour(self.colour)
-                    )
-                    posted_message = await target_channel.send(embed=embed_message)
-                else:
-                    posted_message = await target_channel.send(formatted_message)
-
-                cursor.execute(
-                    '''
-                    INSERT INTO text_messages (guild_id, title, channel_id, message_id, message_content)
-                    VALUES (?, ?, ?, ?, ?)
-                    ''',
-                    (interaction.guild.id, self.message_title, target_channel.id, posted_message.id, formatted_message)
-                )
-                conn.commit()
-                await interaction.followup.send(
-                    f'✅ Nachricht "{self.message_title}" erstellt in {target_channel.mention}!',
-                    ephemeral=True
-                )
-                return
-
-            if self.action == 'edit':
-                cursor.execute(
-                    '''
-                    SELECT id, channel_id, message_id
-                    FROM text_messages
-                    WHERE guild_id = ? AND LOWER(title) = LOWER(?)
-                    LIMIT 1
-                    ''',
-                    (interaction.guild.id, self.message_title)
-                )
-                record = cursor.fetchone()
-
-                if record is None:
-                    await interaction.followup.send(f'❌ Nachricht "{self.message_title}" nicht gefunden!', ephemeral=True)
-                    return
-
-                if record['message_id'] is None:
-                    await interaction.followup.send(
-                        f'❌ Nachricht "{self.message_title}" hat keine gespeicherte Message-ID. Bitte neu erstellen.',
-                        ephemeral=True
-                    )
-                    return
-
-                target_channel = await self.cog._resolve_text_channel(interaction.guild, record['channel_id'])
-                if target_channel is None:
-                    await interaction.followup.send('❌ Ursprungs-Channel nicht gefunden oder nicht mehr zugreifbar.', ephemeral=True)
-                    return
-
-                try:
-                    discord_message = await asyncio.wait_for(
-                        target_channel.fetch_message(record['message_id']),
-                        timeout=10
-                    )
-                except asyncio.TimeoutError:
-                    await interaction.followup.send('❌ Zeitüberschreitung beim Laden der Discord-Nachricht.', ephemeral=True)
-                    return
-                except discord.NotFound:
-                    await interaction.followup.send('❌ Discord-Nachricht wurde bereits gelöscht.', ephemeral=True)
-                    return
-                except (discord.Forbidden, discord.HTTPException):
-                    await interaction.followup.send('❌ Discord-Nachricht konnte nicht geladen werden.', ephemeral=True)
-                    return
-
-                try:
-                    if discord_message.embeds:
-                        existing_embed = discord_message.embeds[0].copy()
-                        existing_embed.title = None
-                        existing_embed.description = formatted_message
-                        await asyncio.wait_for(discord_message.edit(embed=existing_embed), timeout=10)
-                    else:
-                        await asyncio.wait_for(discord_message.edit(content=formatted_message), timeout=10)
-                except asyncio.TimeoutError:
-                    await interaction.followup.send('❌ Zeitüberschreitung beim Bearbeiten der Discord-Nachricht.', ephemeral=True)
-                    return
-                except (discord.Forbidden, discord.HTTPException):
-                    await interaction.followup.send('❌ Discord-Nachricht konnte nicht bearbeitet werden.', ephemeral=True)
-                    return
-
-                cursor.execute(
-                    'UPDATE text_messages SET message_content = ? WHERE id = ?',
-                    (formatted_message, record['id'])
-                )
-                conn.commit()
-                await interaction.followup.send(f'✅ Nachricht "{self.message_title}" bearbeitet!', ephemeral=True)
-        finally:
-            conn.close()
+COMMAND_NAME_PATTERN = re.compile(r'^[a-z0-9_]{1,32}$')
 
 
 class TextMessages(commands.Cog):
-    def __init__(self, bot):
+    text = app_commands.Group(name='text', description='Text-Kommandos verwalten')
+    RESERVED_COMMANDS = {'text', 'role', 'geburtstag', 'ping'}
+
+    def __init__(self, bot: commands.Bot):
         self.bot = bot
+        self._dynamic_commands: dict[tuple[int, str], app_commands.Command] = {}
 
     @staticmethod
-    async def _resolve_text_channel(guild: discord.Guild, channel_id: int) -> discord.TextChannel | None:
-        channel = guild.get_channel(channel_id)
-        if isinstance(channel, discord.TextChannel):
-            return channel
+    def _conn() -> sqlite3.Connection:
+        conn = sqlite3.connect(DB_FILE)
+        conn.row_factory = sqlite3.Row
+        return conn
 
+    async def cog_load(self) -> None:
+        await self._reload_dynamic_commands(sync=False)
+
+    @commands.Cog.listener()
+    async def on_ready(self) -> None:
+        await self._reload_dynamic_commands(sync=True)
+
+    def _is_valid_custom_command_name(self, name: str) -> bool:
+        return bool(COMMAND_NAME_PATTERN.fullmatch(name)) and name not in self.RESERVED_COMMANDS
+
+    async def _reload_dynamic_commands(self, sync: bool) -> None:
         try:
-            fetched_channel = await guild.fetch_channel(channel_id)
-        except (discord.NotFound, discord.Forbidden, discord.HTTPException):
-            return None
+            with self._conn() as conn:
+                rows = conn.execute(
+                    'SELECT DISTINCT guild_id, LOWER(title) AS name FROM text_messages ORDER BY guild_id, name'
+                ).fetchall()
+        except sqlite3.OperationalError:
+            return
 
-        if isinstance(fetched_channel, discord.TextChannel):
-            return fetched_channel
-        return None
+        target_keys = {(int(row['guild_id']), str(row['name'])) for row in rows}
 
-    @staticmethod
-    def _parse_colour(colour: str | None) -> discord.Colour:
-        colour_map = {
-            'red': discord.Colour.red(),
-            'blue': discord.Colour.blue(),
-            'green': discord.Colour.green(),
-            'gold': discord.Colour.gold(),
-            'purple': discord.Colour.purple(),
-            'orange': discord.Colour.orange(),
-        }
-        normalized_colour = (colour or '').strip()
-        if re.fullmatch(r'#[0-9A-Fa-f]{6}', normalized_colour):
-            return discord.Colour(int(normalized_colour[1:], 16))
-        return colour_map.get(normalized_colour.lower(), discord.Colour.red())
+        # Remove commands that no longer exist in DB
+        for key in list(self._dynamic_commands.keys()):
+            if key not in target_keys:
+                guild_id, name = key
+                self.bot.tree.remove_command(name, guild=discord.Object(id=guild_id))
+                self._dynamic_commands.pop(key, None)
+                if sync:
+                    try:
+                        await self.bot.tree.sync(guild=discord.Object(id=guild_id))
+                    except discord.HTTPException:
+                        pass
 
-    @staticmethod
-    def _member_matches_name(member: discord.Member, lowered_name: str) -> bool:
-        return (
-            member.name.lower() == lowered_name
-            or member.display_name.lower() == lowered_name
-            or (member.global_name and member.global_name.lower() == lowered_name)
+        # Register missing commands
+        for guild_id, name in sorted(target_keys):
+            if (guild_id, name) not in self._dynamic_commands and self._is_valid_custom_command_name(name):
+                await self._register_dynamic_command(guild_id, name, sync=sync)
+
+    async def _register_dynamic_command(self, guild_id: int, name: str, sync: bool) -> None:
+        async def dynamic_callback(interaction: discord.Interaction, command_name: str = name, command_guild: int = guild_id) -> None:
+            if interaction.guild is None or interaction.guild.id != command_guild:
+                await interaction.response.send_message('❌ Dieser Befehl ist nur auf dem passenden Server verfügbar.', ephemeral=True)
+                return
+
+            with self._conn() as conn:
+                row = conn.execute(
+                    '''
+                    SELECT message_content
+                    FROM text_messages
+                    WHERE guild_id = ? AND LOWER(title) = LOWER(?)
+                    LIMIT 1
+                    ''',
+                    (interaction.guild.id, command_name),
+                ).fetchone()
+
+            if row is None:
+                await interaction.response.send_message('❌ Dieses Text-Kommando wurde entfernt.', ephemeral=True)
+                return
+
+            await interaction.response.send_message(str(row['message_content']))
+
+        command = app_commands.Command(
+            name=name,
+            description=f'Text-Kommando: {name}',
+            callback=dynamic_callback,
         )
+        self.bot.tree.add_command(command, guild=discord.Object(id=guild_id), override=True)
+        self._dynamic_commands[(guild_id, name)] = command
 
-    @staticmethod
-    async def _resolve_member_by_id(guild: discord.Guild, user_id: int) -> discord.Member | None:
-        member = guild.get_member(user_id)
-        if member is not None:
-            return member
+        if sync:
+            try:
+                await self.bot.tree.sync(guild=discord.Object(id=guild_id))
+            except discord.HTTPException:
+                pass
+
+    async def _remove_dynamic_command(self, guild_id: int, name: str) -> None:
+        self.bot.tree.remove_command(name, guild=discord.Object(id=guild_id))
+        self._dynamic_commands.pop((guild_id, name), None)
         try:
-            return await guild.fetch_member(user_id)
-        except (discord.NotFound, discord.Forbidden, discord.HTTPException):
-            return None
+            await self.bot.tree.sync(guild=discord.Object(id=guild_id))
+        except discord.HTTPException:
+            pass
 
-    @staticmethod
-    async def _resolve_member_by_name(guild: discord.Guild, raw_name: str) -> discord.Member | None:
-        lowered_name = raw_name.lower()
-        cached_member = guild.get_member_named(raw_name)
-        if cached_member is not None and TextMessages._member_matches_name(cached_member, lowered_name):
-            return cached_member
-
-        try:
-            query_result = await guild.query_members(query=raw_name, limit=MEMBER_QUERY_LIMIT)
-        except (discord.Forbidden, discord.HTTPException):
-            query_result = []
-        for member in query_result:
-            if TextMessages._member_matches_name(member, lowered_name):
-                return member
-
-        for member in guild.members:
-            if TextMessages._member_matches_name(member, lowered_name):
-                return member
-        return None
-
-    @staticmethod
-    async def _convert_mentions_to_display(guild: discord.Guild, message: str) -> str:
-        converted_parts: list[str] = []
-        current_position = 0
-        members_by_id: dict[int, discord.Member | None] = {}
-        members_by_name: dict[str, discord.Member | None] = {}
-
-        for match in MENTION_PATTERN.finditer(message):
-            converted_parts.append(message[current_position:match.start()])
-
-            user_id = match.group('id')
-            username = match.group('name')
-            member: discord.Member | None = None
-
-            if user_id is not None:
-                parsed_user_id = int(user_id)
-                if parsed_user_id not in members_by_id:
-                    members_by_id[parsed_user_id] = await TextMessages._resolve_member_by_id(guild, parsed_user_id)
-                member = members_by_id[parsed_user_id]
-            elif username is not None:
-                lowered_username = username.lower()
-                if lowered_username not in members_by_name:
-                    members_by_name[lowered_username] = await TextMessages._resolve_member_by_name(
-                        guild, username
-                    )
-                member = members_by_name[lowered_username]
-
-            if member is None:
-                converted_parts.append(match.group(0))
-            else:
-                converted_parts.append(f'<@{member.id}>')
-
-            current_position = match.end()
-
-        converted_parts.append(message[current_position:])
-        return ''.join(converted_parts)
-
-    @app_commands.command(name='text', description='Verwalte Text-Nachrichten')
-    @app_commands.describe(
-        action='create, edit, delete oder list',
-        channel='Der Channel (nur für create)',
-        title='Der Name/die Kennung der Nachricht',
-        embed='Nachricht als Embed posten (nur für create)',
-        colour='Embed-Farbe (nur für create, z. B. red, blue, green oder #RRGGBB)'
-    )
-    async def text(
+    async def _name_autocomplete(
         self,
         interaction: discord.Interaction,
-        action: str,
-        title: str | None = None,
-        channel: discord.TextChannel | None = None,
-        embed: bool = False,
-        colour: str | None = None
-    ):
+        current: str,
+    ) -> list[app_commands.Choice[str]]:
+        if interaction.guild is None:
+            return []
+        like_value = f'%{current.strip()}%'
+        with self._conn() as conn:
+            rows = conn.execute(
+                '''
+                SELECT title
+                FROM text_messages
+                WHERE guild_id = ? AND title LIKE ? COLLATE NOCASE
+                ORDER BY title COLLATE NOCASE ASC
+                LIMIT 25
+                ''',
+                (interaction.guild.id, like_value),
+            ).fetchall()
+        return [app_commands.Choice(name=str(row['title']), value=str(row['title'])) for row in rows]
+
+    @text.command(name='create', description='Erstelle ein Text-Kommando')
+    @app_commands.default_permissions(administrator=True)
+    @app_commands.describe(name='Kommando-Name (z. B. text_hallo)', content='Inhalt des Kommandos')
+    async def create_text_command(self, interaction: discord.Interaction, name: str, content: str) -> None:
         if interaction.guild is None:
             await interaction.response.send_message('❌ Dieser Befehl ist nur auf Servern verfügbar.', ephemeral=True)
             return
-
         if not interaction.user.guild_permissions.administrator:
             await interaction.response.send_message('❌ Du brauchst Administrator-Rechte!', ephemeral=True)
             return
 
-        conn = sqlite3.connect(DB_FILE)
-        conn.row_factory = sqlite3.Row
-        cursor = conn.cursor()
+        normalized_name = name.strip().lower()
+        if not self._is_valid_custom_command_name(normalized_name):
+            await interaction.response.send_message(
+                '❌ Ungültiger Name. Erlaubt: `a-z`, `0-9`, `_` (1-32 Zeichen).',
+                ephemeral=True,
+            )
+            return
 
-        try:
-            action = action.lower().strip()
-            normalized_title = (title or '').strip()
+        message_content = content.strip()
+        if not message_content:
+            await interaction.response.send_message('❌ Inhalt darf nicht leer sein.', ephemeral=True)
+            return
 
-            if action == 'create':
-                if not normalized_title:
-                    await interaction.response.send_message('❌ Für "create" brauchst du einen Titel (Name/Identifier)!', ephemeral=True)
-                    return
-                if not channel:
-                    await interaction.response.send_message('❌ Für "create" brauchst du einen Channel!', ephemeral=True)
-                    return
+        with self._conn() as conn:
+            existing = conn.execute(
+                'SELECT 1 FROM text_messages WHERE guild_id = ? AND LOWER(title) = LOWER(?) LIMIT 1',
+                (interaction.guild.id, normalized_name),
+            ).fetchone()
+            if existing is not None:
+                await interaction.response.send_message('❌ Dieses Text-Kommando existiert bereits.', ephemeral=True)
+                return
 
-                cursor.execute(
-                    '''
-                    SELECT 1
-                    FROM text_messages
-                    WHERE guild_id = ? AND LOWER(title) = LOWER(?)
-                    LIMIT 1
-                    ''',
-                    (interaction.guild.id, normalized_title)
-                )
-                if cursor.fetchone() is not None:
-                    await interaction.response.send_message(
-                        f'❌ Nachricht "{normalized_title}" existiert bereits!',
-                        ephemeral=True
-                    )
-                    return
-                await interaction.response.send_modal(
-                    TextMessageModal(
-                        cog=self,
-                        action='create',
-                        message_title=normalized_title,
-                        channel_id=channel.id,
-                        embed=embed,
-                        colour=colour
-                    )
-                )
+            conn.execute(
+                'INSERT INTO text_messages (guild_id, title, message_content) VALUES (?, ?, ?)',
+                (interaction.guild.id, normalized_name, message_content),
+            )
+            conn.commit()
 
-            elif action == 'edit':
-                if not normalized_title:
-                    await interaction.response.send_message('❌ Für "edit" brauchst du einen Titel (Name/Identifier)!', ephemeral=True)
-                    return
+        await self._register_dynamic_command(interaction.guild.id, normalized_name, sync=True)
+        await interaction.response.send_message(f'✅ Text-Kommando `/{normalized_name}` erstellt.', ephemeral=True)
 
-                cursor.execute(
-                    '''
-                    SELECT id, channel_id, message_id, message_content
-                    FROM text_messages
-                    WHERE guild_id = ? AND LOWER(title) = LOWER(?)
-                    LIMIT 1
-                    ''',
-                    (interaction.guild.id, normalized_title)
-                )
-                record = cursor.fetchone()
+    @text.command(name='edit', description='Bearbeite ein Text-Kommando')
+    @app_commands.default_permissions(administrator=True)
+    @app_commands.describe(name='Kommando-Name', content='Neuer Inhalt')
+    @app_commands.autocomplete(name=_name_autocomplete)
+    async def edit_text_command(self, interaction: discord.Interaction, name: str, content: str) -> None:
+        if interaction.guild is None:
+            await interaction.response.send_message('❌ Dieser Befehl ist nur auf Servern verfügbar.', ephemeral=True)
+            return
+        if not interaction.user.guild_permissions.administrator:
+            await interaction.response.send_message('❌ Du brauchst Administrator-Rechte!', ephemeral=True)
+            return
 
-                if record is None:
-                    await interaction.response.send_message(f'❌ Nachricht "{normalized_title}" nicht gefunden!', ephemeral=True)
-                elif record['message_id'] is None:
-                    await interaction.response.send_message(
-                        f'❌ Nachricht "{normalized_title}" hat keine gespeicherte Message-ID. Bitte neu erstellen.',
-                        ephemeral=True
-                    )
-                else:
-                    await interaction.response.send_modal(
-                        TextMessageModal(
-                            cog=self,
-                            action='edit',
-                            message_title=normalized_title,
-                            initial_message=record['message_content']
-                        )
-                    )
+        normalized_name = name.strip().lower()
+        new_content = content.strip()
+        if not new_content:
+            await interaction.response.send_message('❌ Inhalt darf nicht leer sein.', ephemeral=True)
+            return
 
-            elif action == 'delete':
-                if not normalized_title:
-                    await interaction.response.send_message('❌ Für "delete" brauchst du einen Titel (Name/Identifier)!', ephemeral=True)
-                    return
-                cursor.execute(
-                    '''
-                    SELECT id, channel_id, message_id
-                    FROM text_messages
-                    WHERE guild_id = ? AND LOWER(title) = LOWER(?)
-                    LIMIT 1
-                    ''',
-                    (interaction.guild.id, normalized_title)
-                )
-                record = cursor.fetchone()
+        with self._conn() as conn:
+            cursor = conn.cursor()
+            cursor.execute(
+                '''
+                UPDATE text_messages
+                SET message_content = ?
+                WHERE guild_id = ? AND LOWER(title) = LOWER(?)
+                ''',
+                (new_content, interaction.guild.id, normalized_name),
+            )
+            conn.commit()
+            if cursor.rowcount == 0:
+                await interaction.response.send_message('❌ Text-Kommando nicht gefunden.', ephemeral=True)
+                return
 
-                if record is None:
-                    await interaction.response.send_message(f'❌ Nachricht "{normalized_title}" nicht gefunden!', ephemeral=True)
-                else:
-                    await interaction.response.defer(ephemeral=True)
-                    delete_note = ''
+        await interaction.response.send_message(f'✅ Text-Kommando `/{normalized_name}` bearbeitet.', ephemeral=True)
 
-                    if record['message_id'] is None:
-                        delete_note = ' (Discord-Nachricht war nicht gespeichert)'
-                    else:
-                        target_channel = await self._resolve_text_channel(interaction.guild, record['channel_id'])
-                        if target_channel is None:
-                            delete_note = ' (Discord-Channel nicht gefunden/zugreifbar)'
-                        else:
-                            try:
-                                discord_message = await asyncio.wait_for(
-                                    target_channel.fetch_message(record['message_id']),
-                                    timeout=10
-                                )
-                                await asyncio.wait_for(discord_message.delete(), timeout=10)
-                            except asyncio.TimeoutError:
-                                delete_note = ' (Timeout beim Löschen der Discord-Nachricht)'
-                            except discord.NotFound:
-                                delete_note = ' (Discord-Nachricht war bereits gelöscht)'
-                            except (discord.Forbidden, discord.HTTPException):
-                                delete_note = ' (Discord-Nachricht konnte nicht gelöscht werden)'
+    @text.command(name='delete', description='Lösche ein Text-Kommando')
+    @app_commands.default_permissions(administrator=True)
+    @app_commands.describe(name='Kommando-Name')
+    @app_commands.autocomplete(name=_name_autocomplete)
+    async def delete_text_command(self, interaction: discord.Interaction, name: str) -> None:
+        if interaction.guild is None:
+            await interaction.response.send_message('❌ Dieser Befehl ist nur auf Servern verfügbar.', ephemeral=True)
+            return
+        if not interaction.user.guild_permissions.administrator:
+            await interaction.response.send_message('❌ Du brauchst Administrator-Rechte!', ephemeral=True)
+            return
 
-                    cursor.execute('DELETE FROM text_messages WHERE id = ?', (record['id'],))
-                    conn.commit()
-                    await interaction.followup.send(
-                        f'✅ Nachricht "{normalized_title}" gelöscht!{delete_note}',
-                        ephemeral=True
-                    )
+        normalized_name = name.strip().lower()
 
-            elif action == 'list':
-                cursor.execute('''
-                SELECT title
-                FROM text_messages
-                WHERE guild_id = ?
-                ORDER BY title COLLATE NOCASE ASC
-                ''', (interaction.guild.id,))
-                titles = [row[0] for row in cursor.fetchall()]
+        with self._conn() as conn:
+            cursor = conn.cursor()
+            cursor.execute(
+                'DELETE FROM text_messages WHERE guild_id = ? AND LOWER(title) = LOWER(?)',
+                (interaction.guild.id, normalized_name),
+            )
+            conn.commit()
+            if cursor.rowcount == 0:
+                await interaction.response.send_message('❌ Text-Kommando nicht gefunden.', ephemeral=True)
+                return
 
-                if not titles:
-                    await interaction.response.send_message('ℹ️ Keine gespeicherten Text-Nachrichten gefunden.', ephemeral=True)
-                    return
+        await self._remove_dynamic_command(interaction.guild.id, normalized_name)
+        await interaction.response.send_message(f'✅ Text-Kommando `/{normalized_name}` gelöscht.', ephemeral=True)
 
-                max_description_length = 4096
-                lines = [f'• `{item}`' for item in titles]
-                description = '\n'.join(lines)
-                if len(description) > max_description_length:
-                    newline_length = 1
-                    fitting_lines = []
-                    current_length = 0
-                    for line in lines:
-                        additional_length = len(line) + (newline_length if fitting_lines else 0)
-                        if current_length + additional_length > max_description_length - 40:
-                            break
-                        fitting_lines.append(line)
-                        current_length += additional_length
-                    remaining = len(lines) - len(fitting_lines)
-                    description = '\n'.join(fitting_lines) + f'\n… und {remaining} weitere'
+    @text.command(name='list', description='Liste alle Text-Kommandos')
+    @app_commands.default_permissions(administrator=True)
+    async def list_text_commands(self, interaction: discord.Interaction) -> None:
+        if interaction.guild is None:
+            await interaction.response.send_message('❌ Dieser Befehl ist nur auf Servern verfügbar.', ephemeral=True)
+            return
+        if not interaction.user.guild_permissions.administrator:
+            await interaction.response.send_message('❌ Du brauchst Administrator-Rechte!', ephemeral=True)
+            return
 
-                embed = discord.Embed(
-                    title='📝 Gespeicherte Nachrichten',
-                    description=description,
-                    color=discord.Colour.red()
-                )
-                embed.set_footer(text='Titel = Name/Identifier der Nachricht')
-                await interaction.response.send_message(embed=embed, ephemeral=True)
+        with self._conn() as conn:
+            rows = conn.execute(
+                'SELECT title FROM text_messages WHERE guild_id = ? ORDER BY title COLLATE NOCASE ASC',
+                (interaction.guild.id,),
+            ).fetchall()
 
-            else:
-                await interaction.response.send_message('❌ Aktion muss "create", "edit", "delete" oder "list" sein!', ephemeral=True)
+        if not rows:
+            await interaction.response.send_message('ℹ️ Keine Text-Kommandos gefunden.', ephemeral=True)
+            return
 
-        finally:
-            conn.close()
+        description = '\n'.join(f'• `/{row["title"]}`' for row in rows)
+        embed = discord.Embed(title='📝 Text-Kommandos', description=description[:4096], color=discord.Color.red())
+        await interaction.response.send_message(embed=embed, ephemeral=True)
 
 
-async def setup(bot):
+async def setup(bot: commands.Bot):
     await bot.add_cog(TextMessages(bot))
