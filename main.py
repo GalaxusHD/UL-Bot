@@ -12,21 +12,24 @@ TOKEN = os.getenv('DISCORD_TOKEN')
 
 intents = discord.Intents.default()
 intents.message_content = True
-intents.members = True
 
-bot = commands.Bot(command_prefix='/', intents=intents)
+bot = commands.Bot(command_prefix='!', intents=intents)
+
+
+@bot.command()
+async def ping(ctx: commands.Context) -> None:
+    await ctx.send('Pong! 🏓')
 
 
 async def load_cogs() -> None:
-    for filename in os.listdir('./cogs'):
-        if filename.endswith('.py') and not filename.startswith('__'):
-            await bot.load_extension(f'cogs.{filename[:-3]}')
-            print(f'Loaded {filename}')
+    for cog_name in ('birthdays', 'text_messages', 'roles'):
+        await bot.load_extension(f'cogs.{cog_name}')
+        print(f'Loaded cogs/{cog_name}.py')
 
 
 @bot.event
 async def on_ready() -> None:
-    print(f'Bot is ready! Logged in as {bot.user}')
+    print(f'Bot ist online als {bot.user}')
     try:
         synced = await bot.tree.sync()
         print(f'Synced {len(synced)} command(s)')
