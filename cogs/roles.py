@@ -216,6 +216,11 @@ class RoleEntryPickerView(discord.ui.View):
         )
         await interaction.response.defer()
         await interaction.followup.send('✅ Eintrag hinzugefügt.', ephemeral=True)
+        await self.builder.refresh()
+        try:
+            await interaction.edit_original_response(view=None)
+        except (discord.NotFound, discord.Forbidden, discord.HTTPException):
+            pass
         self.stop()
 
     @discord.ui.button(label='Abbrechen', style=discord.ButtonStyle.danger, row=2)
