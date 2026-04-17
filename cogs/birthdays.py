@@ -239,7 +239,7 @@ class Birthdays(commands.Cog):
                 day = int(row['day'])
                 month = int(row['month'])
                 year = int(row['year']) if row['year'] is not None else None
-                fallback_name = username if username.startswith('@') else f'@{username}'
+                display_name = username if username.startswith('@') else f'@{username}'
 
                 date_text = f'{day:02d}.{month:02d}'
                 if year is not None:
@@ -247,9 +247,9 @@ class Birthdays(commands.Cog):
                     date_text = f'{date_text}.{year} (Alter: {age})'
 
                 if real_name:
-                    line = f'• {fallback_name} ({real_name}) — {date_text}'
+                    line = f'• {display_name} ({real_name}) — {date_text}'
                 else:
-                    line = f'• {fallback_name} — {date_text}'
+                    line = f'• {display_name} — {date_text}'
                 month_entries[month].append(line)
 
             for month, month_name in MONTH_NAMES.items():
