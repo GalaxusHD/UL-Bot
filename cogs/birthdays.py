@@ -333,7 +333,7 @@ class Birthdays(commands.Cog):
                 day = int(row['day'])
                 month = int(row['month'])
                 year = int(row['year']) if row['year'] is not None else None
-                display_name = username if username.startswith('@') else f'@{username}'
+                display_name = username
 
                 date_text = f'{day:02d}.{month:02d}'
                 if year is not None:

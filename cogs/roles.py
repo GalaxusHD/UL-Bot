@@ -216,7 +216,6 @@ class RoleEntryPickerView(discord.ui.View):
         )
         await interaction.response.defer()
         await interaction.followup.send('✅ Eintrag hinzugefügt.', ephemeral=True)
-        await self.builder.refresh()
         self.stop()
 
     @discord.ui.button(label='Abbrechen', style=discord.ButtonStyle.danger, row=2)
@@ -251,7 +250,10 @@ class RolePanelBuilderView(discord.ui.View):
 
     async def refresh(self) -> None:
         if self.message is not None:
-            await self.message.edit(content=self._render_overview(), view=self)
+            try:
+                await self.message.edit(content=self._render_overview(), view=self)
+            except (discord.NotFound, discord.Forbidden):
+                self.message = None
 
     @discord.ui.button(label='Rolle hinzufügen', style=discord.ButtonStyle.primary)
     async def add_role_button(self, interaction: discord.Interaction, _: discord.ui.Button['RolePanelBuilderView']) -> None:
