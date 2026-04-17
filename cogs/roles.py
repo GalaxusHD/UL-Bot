@@ -13,10 +13,10 @@ CUSTOM_EMOJI_PATTERN = re.compile(r'^<(a?):([a-zA-Z0-9_]+):(\d+)>$')
 STANDARD_EMOJIS = [
     '😀', '😁', '😂', '🤣', '😃', '😄', '😅', '😆', '😉', '😊', '😋', '😎', '😍', '😘',
     '🥰', '😗', '😙', '😚', '🙂', '🤗', '🤔', '😐', '😶', '🙄', '😏', '😣', '😥', '😮',
-    '🤐', '😯', '😪', '😫', '🥱', '😴', '😌', '��', '🧐', '😛', '😜', '🤪', '🤨', '🫠',
+    '🤐', '😯', '😪', '😫', '🥱', '😴', '😌', '🤓', '🧐', '😛', '😜', '🤪', '🤨', '🫠',
     '🫡', '🤩', '🥳', '😇', '🤠', '🥸', '😈', '👻', '💀', '🤖', '👋', '👌', '👍', '👎',
     '👏', '🙏', '💪', '🫶', '🔥', '⭐', '✨', '💫', '🌈', '🎉', '🎊', '🎯', '🏆', '🥇',
-    '🥈', '🥉', '🎮', '🎵', '🎶', '📚', '��', '🔧', '🧠', '💡', '📢', '✅', '❌', '❓',
+    '🥈', '🥉', '🎮', '🎵', '🎶', '📚', '💼', '🔧', '🧠', '💡', '📢', '✅', '❌', '❓',
     '⚠️', '🔒', '🔓', '📌', '🧪', '🛠️', '🚀', '🌍', '🇨🇭', '💬', '🟢', '🟡', '🔵', '🟣',
     '🔴', '⚫', '⚪', '🟤', '1️⃣', '2️⃣', '3️⃣', '4️⃣', '5️⃣', '6️⃣', '7️⃣', '8️⃣', '9️⃣',
 ]
@@ -324,8 +324,15 @@ class Roles(commands.Cog):
         if not isinstance(channel, discord.TextChannel):
             raise discord.NotFound(response=None, message='Channel not found')
         message = await channel.send(embed=self._panel_embed(draft))
-        for entry in draft.entries:
-            await message.add_reaction(entry.display_emoji)
+        try:
+            for entry in draft.entries:
+                await message.add_reaction(entry.display_emoji)
+        except (discord.Forbidden, discord.HTTPException):
+            try:
+                await message.delete()
+            except (discord.Forbidden, discord.HTTPException):
+                pass
+            raise
         return message
 
     async def _update_panel_message(self, guild: discord.Guild, draft: RolePanelDraft) -> discord.Message:
@@ -390,18 +397,19 @@ class Roles(commands.Cog):
     ) -> list[app_commands.Choice[str]]:
         if interaction.guild is None:
             return []
+        like_value = f'%{current.strip()}%'
         with self._conn() as conn:
             rows = conn.execute(
                 '''
                 SELECT title
                 FROM role_messages
-                WHERE guild_id = ?
+                WHERE guild_id = ? AND title LIKE ? COLLATE NOCASE
                 ORDER BY title COLLATE NOCASE ASC
+                LIMIT 25
                 ''',
-                (interaction.guild.id,),
+                (interaction.guild.id, like_value),
             ).fetchall()
-        titles = [str(row['title']) for row in rows if current.lower() in str(row['title']).lower()]
-        return [app_commands.Choice(name=title, value=title) for title in titles[:25]]
+        return [app_commands.Choice(name=str(row['title']), value=str(row['title'])) for row in rows]
 
     @role.command(name='setup', description='Erstelle eine Rollen-Auswahl')
     @app_commands.default_permissions(administrator=True)

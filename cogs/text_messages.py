@@ -12,6 +12,7 @@ COMMAND_NAME_PATTERN = re.compile(r'^[a-z0-9_]{1,32}$')
 
 class TextMessages(commands.Cog):
     text = app_commands.Group(name='text', description='Text-Kommandos verwalten')
+    RESERVED_COMMANDS = {'text', 'role', 'geburtstag', 'ping'}
 
     def __init__(self, bot: commands.Bot):
         self.bot = bot
@@ -31,8 +32,7 @@ class TextMessages(commands.Cog):
         await self._reload_dynamic_commands(sync=True)
 
     def _is_valid_custom_command_name(self, name: str) -> bool:
-        reserved = {'text', 'role', 'geburtstag', 'ping'}
-        return bool(COMMAND_NAME_PATTERN.fullmatch(name)) and name not in reserved
+        return bool(COMMAND_NAME_PATTERN.fullmatch(name)) and name not in self.RESERVED_COMMANDS
 
     async def _reload_dynamic_commands(self, sync: bool) -> None:
         try:
@@ -114,18 +114,19 @@ class TextMessages(commands.Cog):
     ) -> list[app_commands.Choice[str]]:
         if interaction.guild is None:
             return []
+        like_value = f'%{current.strip()}%'
         with self._conn() as conn:
             rows = conn.execute(
                 '''
                 SELECT title
                 FROM text_messages
-                WHERE guild_id = ?
+                WHERE guild_id = ? AND title LIKE ? COLLATE NOCASE
                 ORDER BY title COLLATE NOCASE ASC
+                LIMIT 25
                 ''',
-                (interaction.guild.id,),
+                (interaction.guild.id, like_value),
             ).fetchall()
-        names = [str(row['title']) for row in rows if current.lower() in str(row['title']).lower()]
-        return [app_commands.Choice(name=name, value=name) for name in names[:25]]
+        return [app_commands.Choice(name=str(row['title']), value=str(row['title'])) for row in rows]
 
     @text.command(name='create', description='Erstelle ein Text-Kommando')
     @app_commands.default_permissions(administrator=True)

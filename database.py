@@ -1,16 +1,56 @@
 import sqlite3
 
 DB_FILE = 'ul_bot.db'
+ALLOWED_COLUMN_DEFINITIONS = {
+    "TEXT NOT NULL DEFAULT '@unknown'",
+    "TEXT NOT NULL DEFAULT ''",
+    'TEXT',
+    'INTEGER',
+    'INTEGER NOT NULL DEFAULT 1',
+}
+TABLE_INFO_SQL = {
+    'birthdays': 'PRAGMA table_info(birthdays)',
+    'birthday_settings': 'PRAGMA table_info(birthday_settings)',
+    'text_messages': 'PRAGMA table_info(text_messages)',
+    'role_messages': 'PRAGMA table_info(role_messages)',
+    'role_message_roles': 'PRAGMA table_info(role_message_roles)',
+}
+ALTER_COLUMN_SQL = {
+    ('birthdays', 'username', "TEXT NOT NULL DEFAULT '@unknown'"):
+        "ALTER TABLE birthdays ADD COLUMN username TEXT NOT NULL DEFAULT '@unknown'",
+    ('birthdays', 'real_name', 'TEXT'):
+        'ALTER TABLE birthdays ADD COLUMN real_name TEXT',
+    ('birthdays', 'year', 'INTEGER'):
+        'ALTER TABLE birthdays ADD COLUMN year INTEGER',
+    ('birthdays', 'month', 'INTEGER NOT NULL DEFAULT 1'):
+        'ALTER TABLE birthdays ADD COLUMN month INTEGER NOT NULL DEFAULT 1',
+    ('birthdays', 'day', 'INTEGER NOT NULL DEFAULT 1'):
+        'ALTER TABLE birthdays ADD COLUMN day INTEGER NOT NULL DEFAULT 1',
+    ('birthday_settings', 'current_message_channel_id', 'INTEGER'):
+        'ALTER TABLE birthday_settings ADD COLUMN current_message_channel_id INTEGER',
+    ('text_messages', 'message_content', 'TEXT'):
+        'ALTER TABLE text_messages ADD COLUMN message_content TEXT',
+    ('text_messages', 'message_content', "TEXT NOT NULL DEFAULT ''"):
+        "ALTER TABLE text_messages ADD COLUMN message_content TEXT NOT NULL DEFAULT ''",
+}
 
 
 def _column_exists(cursor: sqlite3.Cursor, table: str, column: str) -> bool:
-    cursor.execute(f'PRAGMA table_info({table})')
+    sql = TABLE_INFO_SQL.get(table)
+    if sql is None:
+        raise ValueError('Unsupported table name')
+    cursor.execute(sql)
     return any(row[1] == column for row in cursor.fetchall())
 
 
 def _ensure_column(cursor: sqlite3.Cursor, table: str, column: str, definition: str) -> None:
+    if definition not in ALLOWED_COLUMN_DEFINITIONS:
+        raise ValueError('Unsafe column definition')
     if not _column_exists(cursor, table, column):
-        cursor.execute(f'ALTER TABLE {table} ADD COLUMN {column} {definition}')
+        sql = ALTER_COLUMN_SQL.get((table, column, definition))
+        if sql is None:
+            raise ValueError('Unsupported column migration')
+        cursor.execute(sql)
 
 
 def init_database() -> None:
@@ -33,17 +73,11 @@ def init_database() -> None:
     )
 
     # Migration support for older birthday schema
-    _ensure_column(cursor, 'birthdays', 'username', "TEXT NOT NULL DEFAULT ''")
+    _ensure_column(cursor, 'birthdays', 'username', "TEXT NOT NULL DEFAULT '@unknown'")
     _ensure_column(cursor, 'birthdays', 'real_name', 'TEXT')
     _ensure_column(cursor, 'birthdays', 'year', 'INTEGER')
-    if _column_exists(cursor, 'birthdays', 'day') and _column_exists(cursor, 'birthdays', 'month'):
-        pass
-    elif _column_exists(cursor, 'birthdays', 'month') and _column_exists(cursor, 'birthdays', 'day'):
-        pass
-    elif _column_exists(cursor, 'birthdays', 'day'):
-        _ensure_column(cursor, 'birthdays', 'month', 'INTEGER NOT NULL DEFAULT 1')
-    elif _column_exists(cursor, 'birthdays', 'month'):
-        _ensure_column(cursor, 'birthdays', 'day', 'INTEGER NOT NULL DEFAULT 1')
+    _ensure_column(cursor, 'birthdays', 'day', 'INTEGER NOT NULL DEFAULT 1')
+    _ensure_column(cursor, 'birthdays', 'month', 'INTEGER NOT NULL DEFAULT 1')
 
     cursor.execute(
         '''

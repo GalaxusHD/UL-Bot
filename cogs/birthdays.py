@@ -10,6 +10,11 @@ from discord.ext import commands, tasks
 from database import DB_FILE
 
 DEFAULT_TIMEZONE = 'Europe/Berlin'
+MIN_BIRTH_YEAR = 1900
+ANNOUNCE_HOUR = 0
+ANNOUNCE_MINUTE = 0
+CLEANUP_HOUR = 23
+CLEANUP_MINUTE = 59
 
 
 class BirthdayModal(discord.ui.Modal, title='Geburtstag eintragen'):
@@ -57,10 +62,13 @@ class BirthdayModal(discord.ui.Modal, title='Geburtstag eintragen'):
         if year_text:
             try:
                 parsed_year = int(year_text)
-                current_year = datetime.now().year
-                if parsed_year < 1900 or parsed_year > current_year:
+                today = datetime.now(self.cog.timezone).date()
+                current_year = today.year
+                if parsed_year < MIN_BIRTH_YEAR or parsed_year > current_year:
                     raise ValueError
-                datetime(parsed_year, month, day)
+                parsed_date = datetime(parsed_year, month, day).date()
+                if parsed_date > today:
+                    raise ValueError
             except (TypeError, ValueError):
                 await interaction.response.send_message('❌ Ungültiges Jahr.', ephemeral=True)
                 return
@@ -266,12 +274,12 @@ class Birthdays(commands.Cog):
 
         role_id = int(settings['role_id']) if settings and settings['role_id'] else None
 
-        if now.hour == 0 and now.minute == 0:
+        if now.hour == ANNOUNCE_HOUR and now.minute == ANNOUNCE_MINUTE:
             if settings and settings['last_announce_date'] == day_key:
                 return
             await self._announce_birthdays(guild, role_id, settings, day_key)
 
-        if now.hour == 23 and now.minute == 59:
+        if now.hour == CLEANUP_HOUR and now.minute == CLEANUP_MINUTE:
             if settings and settings['last_cleanup_date'] == day_key:
                 return
             await self._cleanup_birthdays(guild, role_id, settings, now, day_key)
