@@ -63,8 +63,6 @@ class BirthdayModal(discord.ui.Modal, title='Geburtstag eintragen'):
 
         parts = raw_name.split(maxsplit=1)
         entered_username = parts[0]
-        if not entered_username.startswith('@'):
-            entered_username = f'@{entered_username}'
         own_username = f'@{interaction.user.name}'
         entered_username_key = entered_username.lstrip('@').casefold()
         own_username_key = own_username.lstrip('@').casefold()
