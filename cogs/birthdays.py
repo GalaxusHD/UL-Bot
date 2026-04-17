@@ -122,8 +122,16 @@ class Birthdays(commands.Cog):
             self.daily_scheduler.start()
 
     @app_commands.command(name='geburtstag', description='Trage deinen Geburtstag ein')
-    async def geburtstag(self, interaction: discord.Interaction) -> None:
-        username_default = f'@{interaction.user.name}'
+    @app_commands.describe(username='(Admin) Benutzername für jemand anderen eintragen (optional)')
+    async def geburtstag(self, interaction: discord.Interaction, username: str = None) -> None:
+        if interaction.guild is None:
+            await interaction.response.send_message('❌ Dieser Befehl ist nur auf Servern verfügbar.', ephemeral=True)
+            return
+
+        if username and interaction.user.guild_permissions.administrator:
+            username_default = username if username.startswith('@') else f'@{username}'
+        else:
+            username_default = f'@{interaction.user.name}'
         await interaction.response.send_modal(BirthdayModal(cog=self, username_default=username_default))
 
     @app_commands.command(name='geburtstag_liste', description='Zeige die Geburtstagsliste')
