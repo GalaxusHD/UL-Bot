@@ -247,18 +247,17 @@ class Birthdays(commands.Cog):
                 day = int(row['day'])
                 month = int(row['month'])
                 year = int(row['year']) if row['year'] is not None else None
-                member = guild.get_member(int(row['user_id']))
-                fallback_name = username if username.startswith('@') else f'@{username}'
-                mention = member.mention if member is not None else f'{fallback_name} (left server)'
+                display_name = username if username.startswith('@') else f'@{username}'
 
                 date_text = f'{day:02d}.{month:02d}'
                 if year is not None:
                     age = self._calculate_correct_age(day, month, year, today)
                     date_text = f'{date_text}.{year} (Alter: {age})'
 
-                line = f'• {mention} • {date_text}'
                 if real_name:
-                    line = f'{line} — {real_name}'
+                    line = f'• {display_name} ({real_name}) — {date_text}'
+                else:
+                    line = f'• {display_name} — {date_text}'
                 month_entries[month].append(line)
 
             for month, month_name in MONTH_NAMES.items():
