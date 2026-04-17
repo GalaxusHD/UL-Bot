@@ -1,5 +1,6 @@
 import os
 import sqlite3
+from hashlib import sha256
 from datetime import date, datetime
 
 import discord
@@ -29,6 +30,7 @@ MONTH_NAMES = {
     11: 'November',
     12: 'Dezember',
 }
+MAX_STORAGE_ID_ATTEMPTS = 100
 
 
 class BirthdayModal(discord.ui.Modal, title='Geburtstag eintragen'):
@@ -56,7 +58,7 @@ class BirthdayModal(discord.ui.Modal, title='Geburtstag eintragen'):
 
         raw_name = str(self.discord_name.value).strip()
         if not raw_name.startswith('@'):
-            await interaction.response.send_message('❌ Bitte nutze das Format `@username` oder `@username Realname`.', ephemeral=True)
+            await interaction.response.send_message('❌ Bitte nutze das Format `@username` oder `@username echter Name`.', ephemeral=True)
             return
 
         parts = raw_name.split(maxsplit=1)
@@ -66,8 +68,10 @@ class BirthdayModal(discord.ui.Modal, title='Geburtstag eintragen'):
         own_username_key = own_username.lstrip('@').casefold()
         if interaction.user.guild_permissions.administrator and entered_username_key != own_username_key:
             username = entered_username
+            storage_user_id = self.cog.make_storage_user_id(guild_id=interaction.guild.id, username=username)
         else:
             username = own_username
+            storage_user_id = interaction.user.id
         real_name = parts[1].strip() if len(parts) > 1 and parts[1].strip() else None
 
         try:
@@ -96,7 +100,7 @@ class BirthdayModal(discord.ui.Modal, title='Geburtstag eintragen'):
 
         self.cog.upsert_birthday(
             guild_id=interaction.guild.id,
-            user_id=interaction.user.id,
+            user_id=storage_user_id,
             username=username,
             real_name=real_name,
             day=day,
@@ -136,6 +140,36 @@ class Birthdays(commands.Cog):
 
         username_default = f'@{interaction.user.name}'
         await interaction.response.send_modal(BirthdayModal(cog=self, username_default=username_default))
+
+    @app_commands.command(name='geburtstag_remove', description='Entferne einen Geburtstag aus der Liste')
+    @app_commands.default_permissions(administrator=True)
+    @app_commands.describe(username='Der Benutzername zum Entfernen')
+    async def remove_birthday(self, interaction: discord.Interaction, username: str) -> None:
+        if interaction.guild is None:
+            await interaction.response.send_message('❌ Dieser Befehl ist nur auf Servern verfügbar.', ephemeral=True)
+            return
+        if not interaction.user.guild_permissions.administrator:
+            await interaction.response.send_message('❌ Du brauchst Administrator-Rechte!', ephemeral=True)
+            return
+
+        username_key = self._username_key(username)
+        if not username_key:
+            await interaction.response.send_message('❌ Bitte gib einen gültigen Benutzernamen an.', ephemeral=True)
+            return
+
+        with self._conn() as conn:
+            cursor = conn.execute(
+                'DELETE FROM birthdays WHERE guild_id = ? AND lower(ltrim(username, "@")) = ?',
+                (interaction.guild.id, username_key),
+            )
+            conn.commit()
+
+        if cursor.rowcount <= 0:
+            await interaction.response.send_message('❌ Kein passender Geburtstag gefunden.', ephemeral=True)
+            return
+
+        await self.refresh_birthday_list(interaction.guild)
+        await interaction.response.send_message(f'✅ Geburtstag für @{username_key} entfernt.', ephemeral=True)
 
     @app_commands.command(name='geburtstag_liste', description='Zeige die Geburtstagsliste')
     @app_commands.default_permissions(administrator=True)
@@ -203,6 +237,8 @@ class Birthdays(commands.Cog):
         month: int,
         year: int | None,
     ) -> None:
+        existing_user_id = self._find_user_id_by_username(guild_id=guild_id, username=username)
+        target_user_id = existing_user_id if existing_user_id is not None else user_id
         with self._conn() as conn:
             conn.execute(
                 '''
@@ -215,9 +251,48 @@ class Birthdays(commands.Cog):
                     month = excluded.month,
                     year = excluded.year
                 ''',
-                (guild_id, user_id, username, real_name, day, month, year),
+                (guild_id, target_user_id, username, real_name, day, month, year),
             )
             conn.commit()
+
+    @staticmethod
+    def _username_key(username: str) -> str:
+        return username.strip().lstrip('@').casefold()
+
+    def _find_user_id_by_username(self, guild_id: int, username: str) -> int | None:
+        username_key = self._username_key(username)
+        if not username_key:
+            return None
+
+        with self._conn() as conn:
+            row = conn.execute(
+                'SELECT user_id FROM birthdays WHERE guild_id = ? AND lower(ltrim(username, "@")) = ? LIMIT 1',
+                (guild_id, username_key),
+            ).fetchone()
+        return int(row['user_id']) if row else None
+
+    def make_storage_user_id(self, guild_id: int, username: str) -> int:
+        existing_user_id = self._find_user_id_by_username(guild_id=guild_id, username=username)
+        if existing_user_id is not None:
+            return existing_user_id
+
+        username_key = self._username_key(username)
+        with self._conn() as conn:
+            for attempt in range(MAX_STORAGE_ID_ATTEMPTS):
+                digest = sha256(f'{guild_id}:{username_key}:{attempt}'.encode('utf-8')).digest()
+                # 62-bit mask keeps the synthetic ID safely within SQLite signed INTEGER range after negation.
+                raw_value = int.from_bytes(digest[:8], byteorder='big', signed=False) & ((1 << 62) - 1)
+                synthetic_user_id = -max(1, raw_value)
+                row = conn.execute(
+                    'SELECT user_id FROM birthdays WHERE guild_id = ? AND user_id = ? LIMIT 1',
+                    (guild_id, synthetic_user_id),
+                ).fetchone()
+                if row is None:
+                    return synthetic_user_id
+
+        raise RuntimeError(
+            f'Konnte keine eindeutige Storage-ID für den Benutzernamen {username} in Guild {guild_id} erzeugen.'
+        )
 
     @staticmethod
     def _calculate_correct_age(birth_day: int, birth_month: int, birth_year: int, today: date) -> int:
