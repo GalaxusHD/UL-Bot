@@ -237,8 +237,6 @@ class Birthdays(commands.Cog):
         month: int,
         year: int | None,
     ) -> None:
-        existing_user_id = self._find_user_id_by_username(guild_id=guild_id, username=username)
-        target_user_id = existing_user_id if existing_user_id is not None else user_id
         with self._conn() as conn:
             conn.execute(
                 '''
@@ -251,7 +249,7 @@ class Birthdays(commands.Cog):
                     month = excluded.month,
                     year = excluded.year
                 ''',
-                (guild_id, target_user_id, username, real_name, day, month, year),
+                (guild_id, user_id, username, real_name, day, month, year),
             )
             conn.commit()
 
@@ -264,12 +262,22 @@ class Birthdays(commands.Cog):
         if not username_key:
             return None
 
+        normalized_input = username.strip()
         with self._conn() as conn:
             row = conn.execute(
-                'SELECT user_id FROM birthdays WHERE guild_id = ? AND lower(ltrim(username, "@")) = ? LIMIT 1',
-                (guild_id, username_key),
+                '''
+                SELECT user_id, username
+                FROM birthdays
+                WHERE guild_id = ? AND lower(ltrim(trim(username), "@")) = lower(ltrim(trim(?), "@"))
+                LIMIT 1
+                ''',
+                (guild_id, normalized_input),
             ).fetchone()
-        return int(row['user_id']) if row else None
+        if row is None:
+            return None
+        if self._username_key(str(row['username'])) != username_key:
+            return None
+        return int(row['user_id'])
 
     def make_storage_user_id(self, guild_id: int, username: str) -> int:
         existing_user_id = self._find_user_id_by_username(guild_id=guild_id, username=username)
