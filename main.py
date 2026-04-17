@@ -14,19 +14,33 @@ intents = discord.Intents.default()
 intents.message_content = True
 intents.members = True
 
-bot = commands.Bot(command_prefix='/', intents=intents)
+bot = commands.Bot(command_prefix='!', intents=intents)
+
+
+@bot.command()
+async def ping(ctx: commands.Context) -> None:
+    await ctx.send('Pong! 🏓')
 
 
 async def load_cogs() -> None:
+    required_cogs = {'birthdays', 'text_messages', 'roles'}
+    loaded_cogs = set()
+
     for filename in os.listdir('./cogs'):
         if filename.endswith('.py') and not filename.startswith('__'):
-            await bot.load_extension(f'cogs.{filename[:-3]}')
+            cog_name = filename[:-3]
+            await bot.load_extension(f'cogs.{cog_name}')
+            loaded_cogs.add(cog_name)
             print(f'Loaded {filename}')
+
+    missing_cogs = required_cogs - loaded_cogs
+    if missing_cogs:
+        raise RuntimeError(f'Missing required cogs: {", ".join(sorted(missing_cogs))}')
 
 
 @bot.event
 async def on_ready() -> None:
-    print(f'Bot is ready! Logged in as {bot.user}')
+    print(f'Bot is online as {bot.user}')
     try:
         synced = await bot.tree.sync()
         print(f'Synced {len(synced)} command(s)')
