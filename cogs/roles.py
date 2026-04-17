@@ -252,7 +252,7 @@ class RolePanelBuilderView(discord.ui.View):
         if self.message is not None:
             try:
                 await self.message.edit(content=self._render_overview(), view=self)
-            except discord.HTTPException:
+            except (discord.NotFound, discord.Forbidden):
                 self.message = None
 
     @discord.ui.button(label='Rolle hinzufügen', style=discord.ButtonStyle.primary)
