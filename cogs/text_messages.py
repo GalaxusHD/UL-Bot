@@ -300,10 +300,10 @@ class TextMessages(commands.Cog):
         self,
         interaction: discord.Interaction,
         action: str,
-        title: str = None,
-        channel: discord.TextChannel = None,
+        title: str | None = None,
+        channel: discord.TextChannel | None = None,
         embed: bool = False,
-        colour: str = None
+        colour: str | None = None
     ):
         if interaction.guild is None:
             await interaction.response.send_message('❌ Dieser Befehl ist nur auf Servern verfügbar.', ephemeral=True)
@@ -468,7 +468,7 @@ class TextMessages(commands.Cog):
                 embed = discord.Embed(
                     title='📝 Gespeicherte Nachrichten',
                     description=description,
-                    color=discord.Color.red()
+                    color=discord.Colour.red()
                 )
                 embed.set_footer(text='Titel = Name/Identifier der Nachricht')
                 await interaction.response.send_message(embed=embed, ephemeral=True)
