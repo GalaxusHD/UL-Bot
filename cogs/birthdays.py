@@ -36,7 +36,7 @@ class BirthdayModal(discord.ui.Modal, title='Geburtstag eintragen'):
         super().__init__()
         self.cog = cog
         self.discord_name = discord.ui.TextInput(
-            label='Discord Name (+ optional Realname)',
+            label='Discord Name (+ optional echter Name)',
             placeholder='@username oder @username Max Mustermann',
             default=username_default,
             max_length=100,
@@ -60,7 +60,14 @@ class BirthdayModal(discord.ui.Modal, title='Geburtstag eintragen'):
             return
 
         parts = raw_name.split(maxsplit=1)
-        username = parts[0]
+        entered_username = parts[0]
+        own_username = f'@{interaction.user.name}'
+        entered_username_key = entered_username.lstrip('@').casefold()
+        own_username_key = own_username.lstrip('@').casefold()
+        if interaction.user.guild_permissions.administrator and entered_username_key != own_username_key:
+            username = entered_username
+        else:
+            username = own_username
         real_name = parts[1].strip() if len(parts) > 1 and parts[1].strip() else None
 
         try:
@@ -122,16 +129,12 @@ class Birthdays(commands.Cog):
             self.daily_scheduler.start()
 
     @app_commands.command(name='geburtstag', description='Trage deinen Geburtstag ein')
-    @app_commands.describe(username='(Admin) Benutzername für jemand anderen eintragen (optional)')
-    async def geburtstag(self, interaction: discord.Interaction, username: str = None) -> None:
+    async def geburtstag(self, interaction: discord.Interaction) -> None:
         if interaction.guild is None:
             await interaction.response.send_message('❌ Dieser Befehl ist nur auf Servern verfügbar.', ephemeral=True)
             return
 
-        if username and interaction.user.guild_permissions.administrator:
-            username_default = username if username.startswith('@') else f'@{username}'
-        else:
-            username_default = f'@{interaction.user.name}'
+        username_default = f'@{interaction.user.name}'
         await interaction.response.send_modal(BirthdayModal(cog=self, username_default=username_default))
 
     @app_commands.command(name='geburtstag_liste', description='Zeige die Geburtstagsliste')
