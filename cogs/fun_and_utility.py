@@ -246,7 +246,7 @@ class FunAndUtility(commands.Cog):
     @app_commands.command(name='würfel', description='Würfle einen Würfel mit einer bestimmten Seitenzahl')
     @app_commands.describe(seiten='Anzahl der Seiten des Würfels (z. B. 20)')
     async def dice_command(self, interaction: discord.Interaction, seiten: app_commands.Range[int, 2, 1000]) -> None:
-        result = random.randint(1, int(seiten))
+        result = random.randint(1, seiten)
         embed = discord.Embed(
             title='🎲 Würfelwurf',
             description=f'Du hast einen **{seiten}-seitigen** Würfel geworfen!\n\n🎉 Ergebnis: **{result}**',
@@ -360,7 +360,7 @@ class FunAndUtility(commands.Cog):
                 ORDER BY id ASC
                 LIMIT 1 OFFSET ?
                 ''',
-                (interaction.guild.id, int(eintrag_nummer) - 1),
+                (interaction.guild.id, eintrag_nummer - 1),
             ).fetchone()
             if row is None:
                 await interaction.response.send_message('❌ Eintrag nicht gefunden.', ephemeral=True)
@@ -372,7 +372,7 @@ class FunAndUtility(commands.Cog):
                 SET description = ?
                 WHERE id = ?
                 ''',
-                (clean_description, int(row['id'])),
+                (clean_description, row['id']),
             )
             conn.commit()
 
@@ -403,13 +403,13 @@ class FunAndUtility(commands.Cog):
                 ORDER BY id ASC
                 LIMIT 1 OFFSET ?
                 ''',
-                (interaction.guild.id, int(eintrag_nummer) - 1),
+                (interaction.guild.id, eintrag_nummer - 1),
             ).fetchone()
             if row is None:
                 await interaction.response.send_message('❌ Eintrag nicht gefunden.', ephemeral=True)
                 return
 
-            conn.execute('DELETE FROM admin_logs WHERE id = ?', (int(row['id']),))
+            conn.execute('DELETE FROM admin_logs WHERE id = ?', (row['id'],))
             conn.commit()
 
         await interaction.response.send_message(f'✅ Logeintrag #{eintrag_nummer} wurde entfernt.', ephemeral=True)
@@ -441,7 +441,10 @@ class FunAndUtility(commands.Cog):
                 ''',
                 (message.guild.id, message.author.id),
             ).fetchone()
-            last_award_time = self._parse_timestamp(None if row is None else str(row['last_text_xp_at']))
+            raw_last_text_xp_at = None if row is None else row['last_text_xp_at']
+            last_award_time = self._parse_timestamp(
+                None if raw_last_text_xp_at is None else str(raw_last_text_xp_at)
+            )
             can_award = (
                 last_award_time is None
                 or int((now - last_award_time).total_seconds()) >= TEXT_XP_COOLDOWN_SECONDS
