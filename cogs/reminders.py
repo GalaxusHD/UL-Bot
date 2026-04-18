@@ -285,38 +285,35 @@ class Reminders(commands.Cog):
         now = datetime.now(tz=timezone.utc)
         check_window_start = now - timedelta(seconds=60)
         day_key = now.strftime('%Y-%m-%d')
-        minute_cursor = check_window_start.replace(second=0, microsecond=0)
-        minute_end = now.replace(second=0, microsecond=0)
-        due_slots: list[tuple[int, int]] = []
-        while minute_cursor <= minute_end:
-            slot = (minute_cursor.hour, minute_cursor.minute)
-            if slot not in due_slots:
-                due_slots.append(slot)
-            minute_cursor += timedelta(minutes=1)
-
-        if not due_slots:
-            return
-
-        where_clause = ' OR '.join(['(hour = ? AND minute = ?)'] * len(due_slots))
-        query_params: list[int] = []
-        for hour_value, minute_value in due_slots:
-            query_params.extend([hour_value, minute_value])
+        now_slot = now.hour * 60 + now.minute
+        start_slot = check_window_start.hour * 60 + check_window_start.minute
 
         with sqlite3.connect(DB_FILE) as conn:
             conn.row_factory = sqlite3.Row
-            rows = conn.execute(
-                f'''
-                SELECT id, guild_id, channel_id, hour, minute, message, last_sent_date
-                FROM reminders
-                WHERE {where_clause}
-                ''',
-                query_params,
-            ).fetchall()
+            if now_slot == start_slot:
+                rows = conn.execute(
+                    '''
+                    SELECT id, guild_id, channel_id, hour, minute, message, last_sent_date
+                    FROM reminders
+                    WHERE (hour * 60 + minute) = ?
+                    ''',
+                    (now_slot,),
+                ).fetchall()
+            else:
+                rows = conn.execute(
+                    '''
+                    SELECT id, guild_id, channel_id, hour, minute, message, last_sent_date
+                    FROM reminders
+                    WHERE (hour * 60 + minute) IN (?, ?)
+                    ''',
+                    (start_slot, now_slot),
+                ).fetchall()
 
         for row in rows:
-            hour = int(row['hour'])
-            minute = int(row['minute'])
-            if hour < 0 or hour > 23 or minute < 0 or minute > 59:
+            try:
+                hour = int(row['hour'])
+                minute = int(row['minute'])
+            except (TypeError, ValueError):
                 continue
 
             due_at = now.replace(hour=hour, minute=minute, second=0, microsecond=0)

@@ -189,8 +189,11 @@ class WelcomeModal(discord.ui.Modal, title='Welcome konfigurieren'):
                     ),
                 )
                 conn.commit()
-        except sqlite3.DatabaseError:
-            await interaction.response.send_message('❌ Datenbankfehler beim Speichern des Welcome-Setups.', ephemeral=True)
+        except sqlite3.DatabaseError as exc:
+            await interaction.response.send_message(
+                f'❌ Datenbankfehler beim Speichern des Welcome-Setups: {exc}',
+                ephemeral=True,
+            )
             return
 
         await interaction.response.send_message('✅ Welcome-Setup aktualisiert.', ephemeral=True)
