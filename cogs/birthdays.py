@@ -328,24 +328,27 @@ class Birthdays(commands.Cog):
             today = datetime.now(self.timezone).date()
             month_entries: dict[int, list[str]] = {month: [] for month in range(1, 13)}
             for row in rows:
+                user_id = int(row['user_id'])
                 username = str(row['username'])
                 real_name = str(row['real_name']) if row['real_name'] else None
                 day = int(row['day'])
                 month = int(row['month'])
                 year = int(row['year']) if row['year'] is not None else None
-                display_name = username if username.startswith('@') else f'@{username}'
+
+                if user_id > 0:
+                    display_name = f'<@{user_id}>'
+                else:
+                    display_name = username if username.startswith('@') else f'@{username}'
 
                 date_text = f'{day:02d}.{month:02d}'
                 if year is not None:
                     age = self._calculate_correct_age(day, month, year, today)
                     date_text = f'{date_text}.{year} (Alter: {age})'
 
-                user_id = str(row['user_id']) if row['user_id'] is not None else ''
-                user_mention = f'<@{user_id}>' if user_id.isdigit() else display_name
                 if real_name:
-                    line = f'• {user_mention} ({real_name}) — {date_text}'
+                    line = f'• {display_name} ({real_name}) — {date_text}'
                 else:
-                    line = f'• {user_mention} — {date_text}'
+                    line = f'• {display_name} — {date_text}'
                 month_entries[month].append(line)
 
             for month, month_name in MONTH_NAMES.items():
