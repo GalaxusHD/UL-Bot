@@ -9,7 +9,6 @@ from discord.ext import commands
 from database import DB_FILE
 
 CUSTOM_EMOJI_PATTERN = re.compile(r'^<(a?):([a-zA-Z0-9_]+):(\d+)>$')
-
 STANDARD_EMOJIS = [
     '😀', '😁', '😂', '🤣', '😃', '😄', '😅', '😆', '😉', '😊', '😋', '😎', '😍', '😘',
     '🥰', '😗', '😙', '😚', '🙂', '🤗', '🤔', '😐', '😶', '🙄', '😏', '😣', '😥', '😮',
@@ -20,25 +19,6 @@ STANDARD_EMOJIS = [
     '⚠️', '🔒', '🔓', '📌', '🧪', '🛠️', '🚀', '🌍', '🇨🇭', '💬', '🟢', '🟡', '🔵', '🟣',
     '🔴', '⚫', '⚪', '🟤', '1️⃣', '2️⃣', '3️⃣', '4️⃣', '5️⃣', '6️⃣', '7️⃣', '8️⃣', '9️⃣',
 ]
-
-def pink_role_color() -> discord.Color:
-    return discord.Color.from_rgb(255, 105, 180)
-
-
-ROLE_COLORS = [
-    ('blurple', 'Blurple', discord.Color.blurple),
-    ('red', 'Red', discord.Color.red),
-    ('green', 'Green', discord.Color.green),
-    ('blue', 'Blue', discord.Color.blue),
-    ('gold', 'Gold', discord.Color.gold),
-    ('purple', 'Purple', discord.Color.purple),
-    ('orange', 'Orange', discord.Color.orange),
-    ('greyple', 'Greyple', discord.Color.greyple),
-    ('pink', 'Pink', pink_role_color),
-    ('teal', 'Teal', discord.Color.teal),
-]
-ROLE_COLOR_LABELS = {key: label for key, label, _ in ROLE_COLORS}
-ROLE_COLOR_RESOLVERS = {key: resolver for key, _, resolver in ROLE_COLORS}
 
 
 def normalise_emoji(emoji_value: str) -> tuple[str, str]:
@@ -61,7 +41,6 @@ class DraftRoleEntry:
     role_id: int
     emoji_key: str
     display_emoji: str
-    color_key: str = 'blurple'
 
 
 @dataclass(slots=True)
@@ -69,12 +48,21 @@ class RolePanelDraft:
     guild_id: int
     title: str
     channel_id: int
-    message_id: int | None = None
-    role_message_id: int | None = None
+    description: str
     entries: list[DraftRoleEntry] = field(default_factory=list)
 
 
-class RoleEntryEmojiSelect(discord.ui.Select['RoleEntryPickerView']):
+class RoleSelector(discord.ui.RoleSelect['RolePanelSetupView']):
+    def __init__(self) -> None:
+        super().__init__(placeholder='Rolle auswählen (durchsuchbar)', min_values=1, max_values=1, row=0)
+
+    async def callback(self, interaction: discord.Interaction) -> None:
+        if self.values:
+            self.view.selected_role = self.values[0]
+        await interaction.response.defer()
+
+
+class EmojiSelector(discord.ui.Select['RolePanelSetupView']):
     def __init__(self, options: list[discord.SelectOption]) -> None:
         super().__init__(placeholder='Emoji auswählen', min_values=1, max_values=1, options=options, row=1)
 
@@ -83,27 +71,28 @@ class RoleEntryEmojiSelect(discord.ui.Select['RoleEntryPickerView']):
         await interaction.response.defer()
 
 
-class RoleEntryRoleSelect(discord.ui.RoleSelect['RoleEntryPickerView']):
-    def __init__(self) -> None:
-        super().__init__(placeholder='Rolle auswählen', min_values=1, max_values=1, row=0)
+class EntryRemoveSelector(discord.ui.Select['RolePanelSetupView']):
+    def __init__(self, options: list[discord.SelectOption]) -> None:
+        super().__init__(placeholder='Eintrag zum Entfernen auswählen', min_values=1, max_values=1, options=options, row=2)
 
     async def callback(self, interaction: discord.Interaction) -> None:
-        if self.values:
-            self.view.selected_role = self.values[0]
+        selected_raw = self.values[0]
+        self.view.selected_remove_index = int(selected_raw)
         await interaction.response.defer()
 
 
-class RoleEntryPickerView(discord.ui.View):
-    def __init__(self, guild: discord.Guild, draft: RolePanelDraft, builder: 'RolePanelBuilderView') -> None:
-        super().__init__(timeout=300)
+class RolePanelSetupView(discord.ui.View):
+    def __init__(self, cog: 'Roles', guild: discord.Guild, draft: RolePanelDraft) -> None:
+        super().__init__(timeout=1800)
+        self.cog = cog
         self.guild = guild
         self.draft = draft
-        self.builder = builder
         self.selected_role: discord.Role | None = None
         self.selected_emoji: str | None = None
-        self.selected_color: str = 'blurple'
+        self.selected_remove_index: int | None = None
         self.source: str = 'standard'
         self.page: int = 0
+        self.message: discord.InteractionMessage | None = None
         self._rebuild_components()
 
     @property
@@ -120,77 +109,81 @@ class RoleEntryPickerView(discord.ui.View):
         return ((len(items) - 1) // 25) + 1
 
     def _rebuild_components(self) -> None:
-        previous_role = self.selected_role
         self.clear_items()
-        self.add_item(RoleEntryRoleSelect())
+        self.add_item(RoleSelector())
 
         items = self.source_items
         start = self.page * 25
         page_items = items[start:start + 25]
         if not page_items:
-            options = [discord.SelectOption(label='Keine Emojis verfügbar', value='❌', emoji='❌')]
+            emoji_options = [discord.SelectOption(label='Keine Emojis verfügbar', value='❌', emoji='❌')]
         else:
-            options = [
+            emoji_options = [
                 discord.SelectOption(label=f'{emoji} #{start + index + 1}', value=emoji, emoji=emoji)
                 for index, emoji in enumerate(page_items)
             ]
-        self.add_item(RoleEntryEmojiSelect(options=options))
+        self.add_item(EmojiSelector(options=emoji_options))
+
+        remove_options = [
+            discord.SelectOption(
+                label=f'{entry.display_emoji} Rolle {position}: {entry.role_id}',
+                value=str(position - 1),
+                emoji=entry.display_emoji,
+            )
+            for position, entry in enumerate(self.draft.entries, start=1)
+        ]
+        if remove_options:
+            self.add_item(EntryRemoveSelector(options=remove_options[:25]))
+
         self.add_item(self.switch_source_button)
-        self.add_item(self.color_button)
         self.add_item(self.prev_page_button)
         self.add_item(self.next_page_button)
+        self.add_item(self.add_button)
+        self.add_item(self.remove_button)
         self.add_item(self.save_button)
         self.add_item(self.cancel_button)
-        self.switch_source_button.label = f'Emoji-Quelle: {'Standard' if self.source == 'standard' else 'Server'}'
-        self.color_button.label = f'Farbe: {ROLE_COLOR_LABELS.get(self.selected_color, "Blurple")}'
 
-        if previous_role is not None:
-            self.selected_role = previous_role
+        self.switch_source_button.label = f'Emoji-Quelle: {"Standard" if self.source == "standard" else "Server"}'
+        self.remove_button.disabled = not self.draft.entries
+        self.prev_page_button.disabled = self.page_count <= 1
+        self.next_page_button.disabled = self.page_count <= 1
 
-    @discord.ui.button(label='Emoji-Quelle: Standard', style=discord.ButtonStyle.secondary, row=2)
-    async def switch_source_button(self, interaction: discord.Interaction, _: discord.ui.Button['RoleEntryPickerView']) -> None:
+    def _render_overview(self) -> str:
+        lines = [
+            f'**Titel:** {self.draft.title}',
+            f'**Channel:** <#{self.draft.channel_id}>',
+            f'**Beschreibung:** {self.draft.description or "-"}',
+            '',
+            '**Ausgewählte Rollen:**',
+        ]
+        if not self.draft.entries:
+            lines.append('Noch keine Rollen hinzugefügt.')
+        else:
+            for position, entry in enumerate(self.draft.entries, start=1):
+                lines.append(f'{position}. {entry.display_emoji} <@&{entry.role_id}>')
+        return '\n'.join(lines)
+
+    @discord.ui.button(label='Emoji-Quelle: Standard', style=discord.ButtonStyle.secondary, row=3)
+    async def switch_source_button(self, interaction: discord.Interaction, _: discord.ui.Button['RolePanelSetupView']) -> None:
         self.source = 'custom' if self.source == 'standard' else 'standard'
         self.page = 0
         self._rebuild_components()
-        await interaction.response.edit_message(
-            content=f'Rolle + Emoji wählen (Seite {self.page + 1}/{self.page_count})',
-            view=self,
-        )
+        await interaction.response.edit_message(content=self._render_overview(), view=self)
 
-    @discord.ui.button(label='Farbe: Blurple', style=discord.ButtonStyle.secondary, row=2)
-    async def color_button(self, interaction: discord.Interaction, _: discord.ui.Button['RoleEntryPickerView']) -> None:
-        keys = [key for key, _, _ in ROLE_COLORS]
-        try:
-            next_index = (keys.index(self.selected_color) + 1) % len(keys)
-        except ValueError:
-            next_index = 0
-        self.selected_color = keys[next_index]
-        self._rebuild_components()
-        await interaction.response.edit_message(
-            content=f'Rolle + Emoji wählen (Seite {self.page + 1}/{self.page_count})',
-            view=self,
-        )
-
-    @discord.ui.button(label='◀', style=discord.ButtonStyle.secondary, row=2)
-    async def prev_page_button(self, interaction: discord.Interaction, _: discord.ui.Button['RoleEntryPickerView']) -> None:
+    @discord.ui.button(label='◀', style=discord.ButtonStyle.secondary, row=3)
+    async def prev_page_button(self, interaction: discord.Interaction, _: discord.ui.Button['RolePanelSetupView']) -> None:
         self.page = (self.page - 1) % self.page_count
         self._rebuild_components()
-        await interaction.response.edit_message(
-            content=f'Rolle + Emoji wählen (Seite {self.page + 1}/{self.page_count})',
-            view=self,
-        )
+        await interaction.response.edit_message(content=self._render_overview(), view=self)
 
-    @discord.ui.button(label='▶', style=discord.ButtonStyle.secondary, row=2)
-    async def next_page_button(self, interaction: discord.Interaction, _: discord.ui.Button['RoleEntryPickerView']) -> None:
+    @discord.ui.button(label='▶', style=discord.ButtonStyle.secondary, row=3)
+    async def next_page_button(self, interaction: discord.Interaction, _: discord.ui.Button['RolePanelSetupView']) -> None:
         self.page = (self.page + 1) % self.page_count
         self._rebuild_components()
-        await interaction.response.edit_message(
-            content=f'Rolle + Emoji wählen (Seite {self.page + 1}/{self.page_count})',
-            view=self,
-        )
+        await interaction.response.edit_message(content=self._render_overview(), view=self)
 
-    @discord.ui.button(label='Hinzufügen', style=discord.ButtonStyle.success, row=2)
-    async def save_button(self, interaction: discord.Interaction, _: discord.ui.Button['RoleEntryPickerView']) -> None:
+    @discord.ui.button(label='+ Hinzufügen', style=discord.ButtonStyle.success, row=4)
+    async def add_button(self, interaction: discord.Interaction, _: discord.ui.Button['RolePanelSetupView']) -> None:
         if self.selected_role is None:
             await interaction.response.send_message('❌ Bitte zuerst eine Rolle auswählen.', ephemeral=True)
             return
@@ -211,120 +204,89 @@ class RoleEntryPickerView(discord.ui.View):
                 role_id=self.selected_role.id,
                 emoji_key=emoji_key,
                 display_emoji=display_emoji,
-                color_key=self.selected_color,
             )
         )
-        await interaction.response.defer()
-        await interaction.followup.send('✅ Eintrag hinzugefügt.', ephemeral=True)
-        await self.builder.refresh()
-        try:
-            await interaction.edit_original_response(view=None)
-        except (discord.NotFound, discord.Forbidden, discord.HTTPException):
-            pass
-        self.stop()
+        self.selected_remove_index = len(self.draft.entries) - 1
+        self._rebuild_components()
+        await interaction.response.edit_message(content=self._render_overview(), view=self)
 
-    @discord.ui.button(label='Abbrechen', style=discord.ButtonStyle.danger, row=2)
-    async def cancel_button(self, interaction: discord.Interaction, _: discord.ui.Button['RoleEntryPickerView']) -> None:
-        await interaction.response.edit_message(content='Abgebrochen.', view=None)
-        self.stop()
-
-
-class RolePanelBuilderView(discord.ui.View):
-    def __init__(self, cog: 'Roles', draft: RolePanelDraft) -> None:
-        super().__init__(timeout=1800)
-        self.cog = cog
-        self.draft = draft
-        self.message: discord.InteractionMessage | None = None
-
-    def _render_overview(self) -> str:
-        lines = [
-            f'**Titel:** {self.draft.title}',
-            f'**Channel:** <#{self.draft.channel_id}>',
-            '',
-        ]
-        if not self.draft.entries:
-            lines.append('Noch keine Rollen hinzugefügt. Nutze **Rolle hinzufügen** (unbegrenzt).')
-        else:
-            lines.append('Aktuelle Rollen:')
-            for entry in self.draft.entries:
-                lines.append(
-                    f'- {entry.display_emoji} <@&{entry.role_id}> '
-                    f'({ROLE_COLOR_LABELS.get(entry.color_key, "Blurple")})'
-                )
-        return '\n'.join(lines)
-
-    async def refresh(self) -> None:
-        if self.message is not None:
-            try:
-                await self.message.edit(content=self._render_overview(), view=self)
-            except (discord.NotFound, discord.Forbidden):
-                self.message = None
-
-    @discord.ui.button(label='Rolle hinzufügen', style=discord.ButtonStyle.primary)
-    async def add_role_button(self, interaction: discord.Interaction, _: discord.ui.Button['RolePanelBuilderView']) -> None:
-        guild = interaction.guild
-        if guild is None:
-            await interaction.response.send_message('❌ Guild-Kontext fehlt.', ephemeral=True)
-            return
-
-        picker = RoleEntryPickerView(guild=guild, draft=self.draft, builder=self)
-        await interaction.response.send_message(
-            f'Rolle + Emoji wählen (Seite {picker.page + 1}/{picker.page_count})',
-            view=picker,
-            ephemeral=True,
-        )
-
-    @discord.ui.button(label='Letzte Rolle entfernen', style=discord.ButtonStyle.secondary)
-    async def remove_last_button(self, interaction: discord.Interaction, _: discord.ui.Button['RolePanelBuilderView']) -> None:
+    @discord.ui.button(label='Entfernen', style=discord.ButtonStyle.secondary, row=4)
+    async def remove_button(self, interaction: discord.Interaction, _: discord.ui.Button['RolePanelSetupView']) -> None:
         if not self.draft.entries:
             await interaction.response.send_message('❌ Es gibt keine Rollen zum Entfernen.', ephemeral=True)
             return
-        removed = self.draft.entries.pop()
-        await interaction.response.send_message(
-            f'🗑️ Entfernt: {removed.display_emoji} <@&{removed.role_id}>',
-            ephemeral=True,
-        )
-        await self.refresh()
-
-    @discord.ui.button(label='Speichern', style=discord.ButtonStyle.success)
-    async def publish_button(self, interaction: discord.Interaction, _: discord.ui.Button['RolePanelBuilderView']) -> None:
-        if interaction.guild is None:
-            await interaction.response.send_message('❌ Guild-Kontext fehlt.', ephemeral=True)
+        if self.selected_remove_index is None:
+            await interaction.response.send_message('❌ Bitte zuerst einen Eintrag im Entfernen-Dropdown wählen.', ephemeral=True)
             return
+        if self.selected_remove_index < 0 or self.selected_remove_index >= len(self.draft.entries):
+            await interaction.response.send_message('❌ Ungültiger Eintrag gewählt.', ephemeral=True)
+            return
+
+        self.draft.entries.pop(self.selected_remove_index)
+        self.selected_remove_index = None
+        self._rebuild_components()
+        await interaction.response.edit_message(content=self._render_overview(), view=self)
+
+    @discord.ui.button(label='Speichern', style=discord.ButtonStyle.primary, row=4)
+    async def save_button(self, interaction: discord.Interaction, _: discord.ui.Button['RolePanelSetupView']) -> None:
         if not self.draft.entries:
             await interaction.response.send_message('❌ Bitte mindestens eine Rolle hinzufügen.', ephemeral=True)
             return
 
         await interaction.response.defer(ephemeral=True)
-
         try:
-            if self.draft.role_message_id is None:
-                message = await self.cog._create_panel_message(interaction.guild, self.draft)
-                self.cog._insert_role_panel(self.draft, message.id)
-                result_text = f'✅ Rollen-Auswahl erstellt: {message.jump_url}'
-            else:
-                message = await self.cog._update_panel_message(interaction.guild, self.draft)
-                self.cog._update_role_panel_entries(self.draft)
-                result_text = f'✅ Rollen-Auswahl aktualisiert: {message.jump_url}'
-
-            for component in self.children:
-                component.disabled = True
-            await interaction.edit_original_response(content=f'{self._render_overview()}\n\n{result_text}', view=self)
-            self.stop()
-        except (discord.HTTPException, discord.Forbidden):
-            await interaction.followup.send('❌ Discord-Nachricht konnte nicht gespeichert werden.', ephemeral=True)
+            message = await self.cog._create_panel_message(self.guild, self.draft)
+            self.cog._insert_role_panel(self.draft, message.id)
+        except (discord.Forbidden, discord.HTTPException):
+            await interaction.followup.send('❌ Discord-Nachricht konnte nicht erstellt werden.', ephemeral=True)
+            return
         except sqlite3.DatabaseError:
             await interaction.followup.send('❌ Datenbankfehler beim Speichern der Rollen-Auswahl.', ephemeral=True)
+            return
 
-    @discord.ui.button(label='Abbrechen', style=discord.ButtonStyle.danger)
-    async def cancel_button(self, interaction: discord.Interaction, _: discord.ui.Button['RolePanelBuilderView']) -> None:
+        for component in self.children:
+            component.disabled = True
+        await interaction.edit_original_response(
+            content=f'{self._render_overview()}\n\n✅ Rollen-Auswahl erstellt: {message.jump_url}',
+            view=self,
+        )
+        self.stop()
+
+    @discord.ui.button(label='Abbrechen', style=discord.ButtonStyle.danger, row=4)
+    async def cancel_button(self, interaction: discord.Interaction, _: discord.ui.Button['RolePanelSetupView']) -> None:
         await interaction.response.edit_message(content='Rollen-Auswahl abgebrochen.', view=None)
         self.stop()
 
 
-class Roles(commands.Cog):
-    role = app_commands.Group(name='role', description='Rollen-System')
+class RoleSetupModal(discord.ui.Modal, title='Rollen-Setup'):
+    description = discord.ui.TextInput(
+        label='Beschreibung',
+        placeholder='Beschreibung für das Rollen-Panel',
+        required=False,
+        max_length=1000,
+        style=discord.TextStyle.paragraph,
+    )
 
+    def __init__(self, cog: 'Roles', guild: discord.Guild, title: str, channel: discord.TextChannel) -> None:
+        super().__init__()
+        self.cog = cog
+        self.guild = guild
+        self.panel_title = title
+        self.channel = channel
+
+    async def on_submit(self, interaction: discord.Interaction) -> None:
+        draft = RolePanelDraft(
+            guild_id=self.guild.id,
+            title=self.panel_title,
+            channel_id=self.channel.id,
+            description=str(self.description.value).strip(),
+        )
+        view = RolePanelSetupView(cog=self.cog, guild=self.guild, draft=draft)
+        await interaction.response.send_message(view._render_overview(), view=view, ephemeral=True)
+        view.message = await interaction.original_response()
+
+
+class Roles(commands.Cog):
     def __init__(self, bot: commands.Bot) -> None:
         self.bot = bot
 
@@ -334,49 +296,27 @@ class Roles(commands.Cog):
         conn.row_factory = sqlite3.Row
         return conn
 
-    def _get_panel_by_title(self, guild_id: int, title: str) -> sqlite3.Row | None:
+    def _title_exists(self, guild_id: int, title: str) -> bool:
         with self._conn() as conn:
-            return conn.execute(
+            row = conn.execute(
                 '''
-                SELECT id, guild_id, title, channel_id, message_id
+                SELECT 1
                 FROM role_messages
                 WHERE guild_id = ? AND LOWER(title) = LOWER(?)
                 LIMIT 1
                 ''',
                 (guild_id, title),
             ).fetchone()
+        return row is not None
 
-    def _get_panel_entries(self, role_message_id: int) -> list[DraftRoleEntry]:
-        with self._conn() as conn:
-            rows = conn.execute(
-                '''
-                SELECT role_id, emoji, display_emoji
-                     , COALESCE(color, 'blurple') AS color
-                FROM role_message_roles
-                WHERE role_message_id = ?
-                ORDER BY position ASC
-                ''',
-                (role_message_id,),
-            ).fetchall()
-        return [
-            DraftRoleEntry(
-                role_id=int(row['role_id']),
-                emoji_key=str(row['emoji']),
-                display_emoji=str(row['display_emoji']),
-                color_key=str(row['color']),
-            )
-            for row in rows
-        ]
-
-    @staticmethod
-    def _panel_embed(draft: RolePanelDraft) -> discord.Embed:
+    def _panel_embed(self, draft: RolePanelDraft) -> discord.Embed:
+        role_lines = '\n'.join(f'{entry.display_emoji} • <@&{entry.role_id}>' for entry in draft.entries)
+        description_blocks = [draft.description.strip()] if draft.description.strip() else []
+        description_blocks.append(role_lines)
         embed = discord.Embed(
             title=draft.title,
-            description='\n'.join(f'{entry.display_emoji} • <@&{entry.role_id}>' for entry in draft.entries),
-            color=ROLE_COLOR_RESOLVERS.get(
-                draft.entries[0].color_key if draft.entries else 'blurple',
-                discord.Color.blurple,
-            )(),
+            description='\n\n'.join(description_blocks),
+            color=discord.Color.blurple(),
         )
         embed.set_footer(text='Reagiere, um Rollen zu erhalten oder zu entfernen.')
         return embed
@@ -397,23 +337,6 @@ class Roles(commands.Cog):
             raise
         return message
 
-    async def _update_panel_message(self, guild: discord.Guild, draft: RolePanelDraft) -> discord.Message:
-        channel = guild.get_channel(draft.channel_id)
-        if not isinstance(channel, discord.TextChannel):
-            raise discord.NotFound(response=None, message='Channel not found')
-        if draft.message_id is None:
-            raise discord.NotFound(response=None, message='Message id missing')
-
-        message = await channel.fetch_message(draft.message_id)
-        await message.edit(embed=self._panel_embed(draft))
-        try:
-            await message.clear_reactions()
-        except (discord.Forbidden, discord.HTTPException):
-            pass
-        for entry in draft.entries:
-            await message.add_reaction(entry.display_emoji)
-        return message
-
     def _insert_role_panel(self, draft: RolePanelDraft, message_id: int) -> None:
         with self._conn() as conn:
             cursor = conn.cursor()
@@ -428,67 +351,14 @@ class Roles(commands.Cog):
                     INSERT INTO role_message_roles (role_message_id, role_id, emoji, display_emoji, color, position)
                     VALUES (?, ?, ?, ?, ?, ?)
                     ''',
-                    (role_message_id, entry.role_id, entry.emoji_key, entry.display_emoji, entry.color_key, position),
+                    (role_message_id, entry.role_id, entry.emoji_key, entry.display_emoji, 'blurple', position),
                 )
             conn.commit()
 
-    def _update_role_panel_entries(self, draft: RolePanelDraft) -> None:
-        if draft.role_message_id is None or draft.message_id is None:
-            return
-        with self._conn() as conn:
-            cursor = conn.cursor()
-            cursor.execute(
-                'UPDATE role_messages SET channel_id = ?, message_id = ? WHERE id = ?',
-                (draft.channel_id, draft.message_id, draft.role_message_id),
-            )
-            cursor.execute('DELETE FROM role_message_roles WHERE role_message_id = ?', (draft.role_message_id,))
-            for position, entry in enumerate(draft.entries, start=1):
-                cursor.execute(
-                    '''
-                    INSERT INTO role_message_roles (role_message_id, role_id, emoji, display_emoji, color, position)
-                    VALUES (?, ?, ?, ?, ?, ?)
-                    ''',
-                    (
-                        draft.role_message_id,
-                        entry.role_id,
-                        entry.emoji_key,
-                        entry.display_emoji,
-                        entry.color_key,
-                        position,
-                    ),
-                )
-            conn.commit()
-
-    async def _title_autocomplete(
-        self,
-        interaction: discord.Interaction,
-        current: str,
-    ) -> list[app_commands.Choice[str]]:
-        if interaction.guild is None:
-            return []
-        like_value = f'%{current.strip()}%'
-        with self._conn() as conn:
-            rows = conn.execute(
-                '''
-                SELECT title
-                FROM role_messages
-                WHERE guild_id = ? AND title LIKE ? COLLATE NOCASE
-                ORDER BY title COLLATE NOCASE ASC
-                LIMIT 25
-                ''',
-                (interaction.guild.id, like_value),
-            ).fetchall()
-        return [app_commands.Choice(name=str(row['title']), value=str(row['title'])) for row in rows]
-
-    @role.command(name='setup', description='Erstelle eine Rollen-Auswahl')
+    @app_commands.command(name='role', description='Erstelle eine Rollen-Auswahl')
     @app_commands.default_permissions(administrator=True)
-    @app_commands.describe(title='Titel/Name der Rollen-Auswahl', channel='Channel für die Rollen-Auswahl')
-    async def setup_role_selector(
-        self,
-        interaction: discord.Interaction,
-        title: str,
-        channel: discord.TextChannel,
-    ) -> None:
+    @app_commands.describe(title='Titel der Rollen-Auswahl', channel='Channel für die Rollen-Auswahl')
+    async def role_command(self, interaction: discord.Interaction, title: str, channel: discord.TextChannel) -> None:
         if interaction.guild is None:
             await interaction.response.send_message('❌ Dieser Befehl ist nur auf Servern verfügbar.', ephemeral=True)
             return
@@ -496,78 +366,16 @@ class Roles(commands.Cog):
             await interaction.response.send_message('❌ Du brauchst Administrator-Rechte!', ephemeral=True)
             return
 
-        if self._get_panel_by_title(interaction.guild.id, title.strip()) is not None:
+        clean_title = title.strip()
+        if not clean_title:
+            await interaction.response.send_message('❌ Titel darf nicht leer sein.', ephemeral=True)
+            return
+        if self._title_exists(interaction.guild.id, clean_title):
             await interaction.response.send_message('❌ Eine Rollen-Auswahl mit diesem Titel existiert bereits.', ephemeral=True)
             return
 
-        draft = RolePanelDraft(guild_id=interaction.guild.id, title=title.strip(), channel_id=channel.id)
-        view = RolePanelBuilderView(cog=self, draft=draft)
-        await interaction.response.send_message(view._render_overview(), view=view, ephemeral=True)
-        view.message = await interaction.original_response()
-
-    @role.command(name='edit', description='Bearbeite eine bestehende Rollen-Auswahl')
-    @app_commands.default_permissions(administrator=True)
-    @app_commands.describe(title='Titel/Name der Rollen-Auswahl')
-    @app_commands.autocomplete(title=_title_autocomplete)
-    async def edit_role_selector(self, interaction: discord.Interaction, title: str) -> None:
-        if interaction.guild is None:
-            await interaction.response.send_message('❌ Dieser Befehl ist nur auf Servern verfügbar.', ephemeral=True)
-            return
-        if not interaction.user.guild_permissions.administrator:
-            await interaction.response.send_message('❌ Du brauchst Administrator-Rechte!', ephemeral=True)
-            return
-
-        panel = self._get_panel_by_title(interaction.guild.id, title.strip())
-        if panel is None:
-            await interaction.response.send_message('❌ Rollen-Auswahl nicht gefunden.', ephemeral=True)
-            return
-
-        entries = self._get_panel_entries(int(panel['id']))
-        draft = RolePanelDraft(
-            guild_id=interaction.guild.id,
-            title=str(panel['title']),
-            channel_id=int(panel['channel_id']),
-            message_id=int(panel['message_id']),
-            role_message_id=int(panel['id']),
-            entries=entries,
-        )
-
-        view = RolePanelBuilderView(cog=self, draft=draft)
-        await interaction.response.send_message(view._render_overview(), view=view, ephemeral=True)
-        view.message = await interaction.original_response()
-
-    @role.command(name='delete', description='Lösche eine Rollen-Auswahl')
-    @app_commands.default_permissions(administrator=True)
-    @app_commands.describe(title='Titel/Name der Rollen-Auswahl')
-    @app_commands.autocomplete(title=_title_autocomplete)
-    async def delete_role_selector(self, interaction: discord.Interaction, title: str) -> None:
-        if interaction.guild is None:
-            await interaction.response.send_message('❌ Dieser Befehl ist nur auf Servern verfügbar.', ephemeral=True)
-            return
-        if not interaction.user.guild_permissions.administrator:
-            await interaction.response.send_message('❌ Du brauchst Administrator-Rechte!', ephemeral=True)
-            return
-
-        panel = self._get_panel_by_title(interaction.guild.id, title.strip())
-        if panel is None:
-            await interaction.response.send_message('❌ Rollen-Auswahl nicht gefunden.', ephemeral=True)
-            return
-
-        await interaction.response.defer(ephemeral=True)
-
-        channel = interaction.guild.get_channel(int(panel['channel_id']))
-        if isinstance(channel, discord.TextChannel):
-            try:
-                message = await channel.fetch_message(int(panel['message_id']))
-                await message.delete()
-            except (discord.NotFound, discord.Forbidden, discord.HTTPException):
-                pass
-
-        with self._conn() as conn:
-            conn.execute('DELETE FROM role_messages WHERE id = ?', (int(panel['id']),))
-            conn.commit()
-
-        await interaction.followup.send('✅ Rollen-Auswahl gelöscht.', ephemeral=True)
+        modal = RoleSetupModal(cog=self, guild=interaction.guild, title=clean_title, channel=channel)
+        await interaction.response.send_modal(modal)
 
     async def _toggle_role(self, payload: discord.RawReactionActionEvent, add_role: bool) -> None:
         if payload.guild_id is None:
