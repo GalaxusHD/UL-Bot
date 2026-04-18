@@ -33,6 +33,10 @@ ALTER_COLUMN_SQL = {
         'ALTER TABLE text_messages ADD COLUMN message_content TEXT',
     ('text_messages', 'message_content', "TEXT NOT NULL DEFAULT ''"):
         "ALTER TABLE text_messages ADD COLUMN message_content TEXT NOT NULL DEFAULT ''",
+    ('text_messages', 'channel_id', 'INTEGER'):
+        'ALTER TABLE text_messages ADD COLUMN channel_id INTEGER',
+    ('text_messages', 'message_id', 'INTEGER'):
+        'ALTER TABLE text_messages ADD COLUMN message_id INTEGER',
     ('role_message_roles', 'color', "TEXT NOT NULL DEFAULT 'blurple'"):
         "ALTER TABLE role_message_roles ADD COLUMN color TEXT NOT NULL DEFAULT 'blurple'",
 }
@@ -114,14 +118,19 @@ def init_database() -> None:
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             guild_id INTEGER NOT NULL,
             title TEXT NOT NULL,
+            channel_id INTEGER,
+            message_id INTEGER,
             message_content TEXT NOT NULL,
-            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            UNIQUE(guild_id, title)
         )
         '''
     )
 
     # Migration support for older text_messages schema
     _ensure_column(cursor, 'text_messages', 'message_content', "TEXT NOT NULL DEFAULT ''")
+    _ensure_column(cursor, 'text_messages', 'channel_id', 'INTEGER')
+    _ensure_column(cursor, 'text_messages', 'message_id', 'INTEGER')
 
     cursor.execute(
         '''
@@ -156,7 +165,8 @@ def init_database() -> None:
     cursor.execute('CREATE INDEX IF NOT EXISTS idx_birthdays_date ON birthdays (month, day)')
     cursor.execute('CREATE INDEX IF NOT EXISTS idx_birthdays_lookup ON birthdays (guild_id, user_id)')
     cursor.execute('CREATE INDEX IF NOT EXISTS idx_text_messages_guild_title ON text_messages (guild_id, title)')
-    cursor.execute('CREATE UNIQUE INDEX IF NOT EXISTS idx_text_messages_unique_title ON text_messages (guild_id, title COLLATE NOCASE)')
+    cursor.execute('DROP INDEX IF EXISTS idx_text_messages_unique_title')
+    cursor.execute('CREATE UNIQUE INDEX IF NOT EXISTS idx_text_messages_unique_guild_title ON text_messages (guild_id, title)')
     cursor.execute('CREATE INDEX IF NOT EXISTS idx_role_messages_lookup ON role_messages (guild_id, message_id)')
     cursor.execute('CREATE UNIQUE INDEX IF NOT EXISTS idx_role_messages_unique_title ON role_messages (guild_id, title COLLATE NOCASE)')
     cursor.execute('CREATE INDEX IF NOT EXISTS idx_role_message_roles_lookup ON role_message_roles (role_message_id, emoji)')
