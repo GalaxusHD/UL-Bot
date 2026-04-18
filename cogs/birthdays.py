@@ -507,7 +507,10 @@ class Birthdays(commands.Cog):
 
         if birthday_members:
             mentions = ', '.join(member.mention for member in birthday_members)
-            text = f'Das gesamte UL Team wünscht {mentions} alles Gute zum Geburtstag!'
+            text = (
+                '||@everyone|| Heute hat jemand Geburtstag! :birthday:\n'
+                f'Das gesamte UL Team wünscht {mentions} alles Gute zum Geburtstag! :tada:'
+            )
             try:
                 sent_message = await target_channel.send(text)
                 current_message_id = sent_message.id
