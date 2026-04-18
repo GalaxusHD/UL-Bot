@@ -284,13 +284,14 @@ class Reminders(commands.Cog):
 
         await interaction.response.send_message(f'✅ Reminder "{row["title"]}" wurde gelöscht.', ephemeral=True)
 
-    @tasks.loop(seconds=20)
+    @tasks.loop(seconds=30)
     async def daily_reminder_scheduler(self) -> None:
         now = datetime.now(tz=timezone.utc)
         check_window_start = now - timedelta(seconds=60)
         day_key = now.strftime('%Y-%m-%d')
-        # The loop runs every 20s and checks the previous 60s window so reminders still fire
-        # when task execution drifts across minute boundaries.
+        # The loop runs every 30s and checks the previous 60s window to tolerate delayed
+        # executions and prevent missed reminders at minute boundaries.
+        # Slot values are stored as "minutes since midnight" for simple SQL matching.
         now_slot = now.hour * 60 + now.minute
         start_slot = check_window_start.hour * 60 + check_window_start.minute
         candidate_slots = sorted({start_slot, now_slot})
@@ -324,6 +325,8 @@ class Reminders(commands.Cog):
                 continue
 
             due_at = now.replace(hour=hour, minute=minute, second=0, microsecond=0)
+            # If the slot time is in the future for today, it belongs to the previous day
+            # (e.g. window crosses midnight and includes 23:59 while now is 00:00).
             if due_at > now:
                 due_at -= timedelta(days=1)
             if due_at < check_window_start or due_at > now:
