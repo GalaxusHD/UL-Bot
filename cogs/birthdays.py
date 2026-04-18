@@ -505,7 +505,7 @@ class Birthdays(commands.Cog):
         if target_channel is None:
             return False
 
-        if birthday_members and target_channel is not None:
+        if birthday_members:
             mentions = ', '.join(member.mention for member in birthday_members)
             text = f'Das gesamte UL Team wünscht {mentions} alles Gute zum Geburtstag!'
             try:
