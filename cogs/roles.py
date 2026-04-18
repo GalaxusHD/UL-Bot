@@ -578,6 +578,67 @@ class Roles(commands.Cog):
         modal = RoleSetupModal(cog=self, guild=interaction.guild, draft=draft)
         await interaction.response.send_modal(modal)
 
+    @app_commands.command(name='role_remove', description='Lösche eine bestehende Rollen-Auswahl')
+    @app_commands.default_permissions(administrator=True)
+    @app_commands.describe(title='Titel der Rollen-Auswahl')
+    @app_commands.autocomplete(title=_title_autocomplete)
+    async def role_remove_command(self, interaction: discord.Interaction, title: str) -> None:
+        if interaction.guild is None:
+            await interaction.response.send_message('❌ Dieser Befehl ist nur auf Servern verfügbar.', ephemeral=True)
+            return
+        if not interaction.user.guild_permissions.administrator:
+            await interaction.response.send_message('❌ Du brauchst Administrator-Rechte!', ephemeral=True)
+            return
+
+        clean_title = title.strip()
+        if not clean_title:
+            await interaction.response.send_message('❌ Titel darf nicht leer sein.', ephemeral=True)
+            return
+
+        with self._conn() as conn:
+            panel_row = conn.execute(
+                '''
+                SELECT id, channel_id, message_id, title
+                FROM role_messages
+                WHERE guild_id = ? AND LOWER(title) = LOWER(?)
+                LIMIT 1
+                ''',
+                (interaction.guild.id, clean_title),
+            ).fetchone()
+
+        if panel_row is None:
+            await interaction.response.send_message('❌ Rollen-Auswahl nicht gefunden.', ephemeral=True)
+            return
+
+        await interaction.response.defer(ephemeral=True)
+        delete_note = ''
+        message_id = panel_row['message_id']
+        channel_id = panel_row['channel_id']
+        channel = interaction.guild.get_channel(int(channel_id)) if channel_id is not None else None
+        if message_id is None:
+            delete_note = ' (Nachricht war nicht gespeichert)'
+        elif isinstance(channel, discord.TextChannel):
+            try:
+                message = await channel.fetch_message(int(message_id))
+                await message.delete()
+            except discord.NotFound:
+                delete_note = ' (Nachricht war bereits gelöscht)'
+            except (discord.Forbidden, discord.HTTPException):
+                delete_note = ' (Nachricht konnte nicht gelöscht werden)'
+        else:
+            delete_note = ' (Channel nicht gefunden)'
+
+        try:
+            with self._conn() as conn:
+                conn.execute('DELETE FROM role_message_roles WHERE role_message_id = ?', (int(panel_row['id']),))
+                conn.execute('DELETE FROM role_messages WHERE id = ?', (int(panel_row['id']),))
+                conn.commit()
+        except sqlite3.DatabaseError:
+            await interaction.followup.send('❌ Datenbankfehler beim Löschen der Rollen-Auswahl.', ephemeral=True)
+            return
+
+        await interaction.followup.send(f'✅ Rollen-Auswahl "{panel_row["title"]}" gelöscht!{delete_note}', ephemeral=True)
+
     async def _toggle_role(self, payload: discord.RawReactionActionEvent, add_role: bool) -> None:
         if payload.guild_id is None:
             return
