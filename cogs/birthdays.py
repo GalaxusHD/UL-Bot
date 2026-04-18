@@ -135,7 +135,7 @@ class Birthdays(commands.Cog):
             BirthdayModal(cog=self, target_user_id=target_user.id, target_username=target_username)
         )
 
-    @app_commands.command(name='geburtstag_remove', description='Entferne einen Geburtstag aus der Liste')
+    @app_commands.command(name='geburtstag_entfernen', description='Entferne einen Geburtstag aus der Liste')
     @app_commands.default_permissions(administrator=True)
     @app_commands.describe(user='Der Benutzer zum Entfernen')
     async def remove_birthday(self, interaction: discord.Interaction, user: discord.Member) -> None:
@@ -160,9 +160,9 @@ class Birthdays(commands.Cog):
         await self.refresh_birthday_list(interaction.guild)
         await interaction.response.send_message(f'✅ Geburtstag für {user.mention} entfernt.', ephemeral=True)
 
-    @app_commands.command(name='geburtstag_liste', description='Zeige die Geburtstagsliste')
+    @app_commands.command(name='geburtstagsliste', description='Zeige die Geburtstagsliste')
     @app_commands.default_permissions(administrator=True)
-    async def geburtstag_liste(self, interaction: discord.Interaction) -> None:
+    async def geburtstagsliste(self, interaction: discord.Interaction) -> None:
         if interaction.guild is None:
             await interaction.response.send_message('❌ Dieser Befehl ist nur auf Servern verfügbar.', ephemeral=True)
             return
@@ -192,10 +192,10 @@ class Birthdays(commands.Cog):
 
         await interaction.response.send_message('✅ Geburtstagsliste wurde erstellt/aktualisiert.', ephemeral=True)
 
-    @app_commands.command(name='geburtstag_rolle', description='Setze die Geburtstagsrolle')
+    @app_commands.command(name='geburtstagsrolle', description='Setze die Geburtstagsrolle')
     @app_commands.default_permissions(administrator=True)
     @app_commands.describe(role='Rolle für Geburtstagskinder')
-    async def geburtstag_rolle(self, interaction: discord.Interaction, role: discord.Role) -> None:
+    async def geburtstagsrolle(self, interaction: discord.Interaction, role: discord.Role) -> None:
         if interaction.guild is None:
             await interaction.response.send_message('❌ Dieser Befehl ist nur auf Servern verfügbar.', ephemeral=True)
             return
@@ -246,7 +246,7 @@ class Birthdays(commands.Cog):
 
         if settings is None or settings['list_channel_id'] is None:
             await interaction.response.send_message(
-                '❌ Keine Geburtstagsliste eingerichtet. Nutze zuerst /geburtstag_liste.',
+                '❌ Keine Geburtstagsliste eingerichtet. Nutze zuerst /geburtstagsliste.',
                 ephemeral=True,
             )
             return
