@@ -340,10 +340,12 @@ class Birthdays(commands.Cog):
                     age = self._calculate_correct_age(day, month, year, today)
                     date_text = f'{date_text}.{year} (Alter: {age})'
 
+                user_id = str(row['user_id']) if row['user_id'] is not None else ''
+                user_mention = f'<@{user_id}>' if user_id.isdigit() else display_name
                 if real_name:
-                    line = f'• {display_name} ({real_name}) — {date_text}'
+                    line = f'• {user_mention} ({real_name}) — {date_text}'
                 else:
-                    line = f'• {display_name} — {date_text}'
+                    line = f'• {user_mention} — {date_text}'
                 month_entries[month].append(line)
 
             for month, month_name in MONTH_NAMES.items():
