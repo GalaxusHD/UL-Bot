@@ -1,4 +1,4 @@
-from datetime import datetime
+from datetime import datetime, timezone
 import sqlite3
 
 import discord
@@ -125,7 +125,7 @@ class Reminders(commands.Cog):
 
     @tasks.loop(minutes=1)
     async def daily_reminder_scheduler(self) -> None:
-        now = datetime.utcnow()
+        now = datetime.now(timezone.utc)
         day_key = now.strftime('%Y-%m-%d')
 
         with sqlite3.connect(DB_FILE) as conn:

@@ -410,7 +410,7 @@ class Roles(commands.Cog):
             title=str(panel_row['title']),
             channel_id=int(panel_row['channel_id']),
             description=str(panel_row['description'] or ''),
-            embed_colour=str(panel_row['color'] or 'blurple'),
+            embed_colour=(parse_embed_colour(str(panel_row['color'] or 'blurple')) or ('blurple', discord.Color.blurple()))[0],
             panel_id=int(panel_row['id']),
             message_id=int(panel_row['message_id']),
             entries=[
@@ -629,7 +629,10 @@ class Roles(commands.Cog):
                             panel_emoji = str(panel_role['emoji'])
                             if panel_emoji == emoji_key:
                                 continue
-                            await message.remove_reaction(str(panel_role['display_emoji']), member)
+                            try:
+                                await message.remove_reaction(str(panel_role['display_emoji']), member)
+                            except (discord.NotFound, discord.Forbidden, discord.HTTPException):
+                                continue
                     except (discord.NotFound, discord.Forbidden, discord.HTTPException):
                         pass
 
