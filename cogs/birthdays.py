@@ -397,6 +397,15 @@ class Birthdays(commands.Cog):
             if settings and settings['last_announce_date'] == day_key:
                 return
             await self._announce_birthdays(guild, role_id, settings, day_key)
+        elif now.minute == ANNOUNCE_MINUTE and (settings is None or settings['last_announce_date'] != day_key):
+            with self._conn() as conn:
+                rows = conn.execute(
+                    'SELECT user_id FROM birthdays WHERE guild_id = ? AND day = ? AND month = ?',
+                    (guild.id, now.day, now.month),
+                ).fetchall()
+
+            if rows:
+                await self._announce_birthdays(guild, role_id, settings, day_key)
 
         if now.hour == CLEANUP_HOUR and now.minute == CLEANUP_MINUTE:
             if settings and settings['last_cleanup_date'] == day_key:
