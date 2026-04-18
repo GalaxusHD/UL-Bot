@@ -9,15 +9,13 @@ from discord.ext import commands
 from database import DB_FILE
 
 CUSTOM_EMOJI_PATTERN = re.compile(r'^<(a?):([a-zA-Z0-9_]+):(\d+)>$')
-STANDARD_EMOJIS = [
-    '😀', '😁', '😂', '🤣', '😃', '😄', '😅', '😆', '😉', '😊', '😋', '😎', '😍', '😘',
-    '🥰', '😗', '😙', '😚', '🙂', '🤗', '🤔', '😐', '😶', '🙄', '😏', '😣', '😥', '😮',
-    '🤐', '😯', '😪', '😫', '🥱', '😴', '😌', '🤓', '🧐', '😛', '😜', '🤪', '🤨', '🫠',
-    '🫡', '🤩', '🥳', '😇', '🤠', '🥸', '😈', '👻', '💀', '🤖', '👋', '👌', '👍', '👎',
-    '👏', '🙏', '💪', '🫶', '🔥', '⭐', '✨', '💫', '🌈', '🎉', '🎊', '🎯', '🏆', '🥇',
-    '🥈', '🥉', '🎮', '🎵', '🎶', '📚', '💼', '🔧', '🧠', '💡', '📢', '✅', '❌', '❓',
-    '⚠️', '🔒', '🔓', '📌', '🧪', '🛠️', '🚀', '🌍', '🇨🇭', '💬', '🟢', '🟡', '🔵', '🟣',
-    '🔴', '⚫', '⚪', '🟤', '1️⃣', '2️⃣', '3️⃣', '4️⃣', '5️⃣', '6️⃣', '7️⃣', '8️⃣', '9️⃣',
+SYMBOL_EMOJIS = [
+    '✅', '❌', '⭕', '⚫', '⚪', '📍', '✔️', '❎', '✖️', '⭐',
+    '💫', '🔔', '🔕', '📢', '📣', '❓', '❔', '⚠️', '🆘', '💯',
+]
+COLOR_EMOJIS = [
+    '🔴', '🟠', '🟡', '🟢', '🔵', '🟣', '🟤', '⚫', '⚪',
+    '🟥', '🟧', '🟨', '🟩', '🟦', '🟪', '🟫', '⬛', '⬜',
 ]
 
 
@@ -53,18 +51,21 @@ class RolePanelDraft:
 
 
 class RoleSelector(discord.ui.RoleSelect['RolePanelSetupView']):
-    def __init__(self) -> None:
+    def __init__(self, selected_role: discord.Role | None = None) -> None:
         super().__init__(placeholder='Rolle auswählen (durchsuchbar)', min_values=1, max_values=1, row=0)
+        if selected_role is not None:
+            self.default_values = [selected_role]
 
     async def callback(self, interaction: discord.Interaction) -> None:
         if self.values:
             self.view.selected_role = self.values[0]
+            self.view.selected_role_id = self.values[0].id
         await interaction.response.defer()
 
 
 class EmojiSelector(discord.ui.Select['RolePanelSetupView']):
-    def __init__(self, options: list[discord.SelectOption]) -> None:
-        super().__init__(placeholder='Emoji auswählen', min_values=1, max_values=1, options=options, row=1)
+    def __init__(self, options: list[discord.SelectOption], category_name: str) -> None:
+        super().__init__(placeholder=f'Emoji auswählen ({category_name})', min_values=1, max_values=1, options=options, row=1)
 
     async def callback(self, interaction: discord.Interaction) -> None:
         self.view.selected_emoji = self.values[0]
@@ -88,54 +89,59 @@ class RolePanelSetupView(discord.ui.View):
         self.guild = guild
         self.draft = draft
         self.selected_role: discord.Role | None = None
+        self.selected_role_id: int | None = None
         self.selected_emoji: str | None = None
         self.selected_remove_index: int | None = None
-        self.source: str = 'standard'
         self.page: int = 0
         self.message: discord.InteractionMessage | None = None
         self._rebuild_components()
 
     @property
     def source_items(self) -> list[str]:
-        if self.source == 'custom':
-            return [str(emoji) for emoji in self.guild.emojis]
-        return STANDARD_EMOJIS
+        if self.page == 1:
+            return COLOR_EMOJIS
+        return SYMBOL_EMOJIS
 
     @property
     def page_count(self) -> int:
-        items = self.source_items
-        if not items:
-            return 1
-        return ((len(items) - 1) // 25) + 1
+        return 2
 
     def _rebuild_components(self) -> None:
         self.clear_items()
-        self.add_item(RoleSelector())
+        selected_role = self.guild.get_role(self.selected_role_id) if self.selected_role_id else None
+        if selected_role is not None:
+            self.selected_role = selected_role
+        self.add_item(RoleSelector(selected_role=selected_role))
 
         items = self.source_items
-        start = self.page * 25
-        page_items = items[start:start + 25]
+        page_items = items[:25]
+        category_name = 'Symbole' if self.page == 0 else 'Farben'
         if not page_items:
             emoji_options = [discord.SelectOption(label='Keine Emojis verfügbar', value='❌', emoji='❌')]
         else:
             emoji_options = [
-                discord.SelectOption(label=f'{emoji} #{start + index + 1}', value=emoji, emoji=emoji)
+                discord.SelectOption(
+                    label=f'{emoji} #{index + 1}',
+                    value=emoji,
+                    emoji=emoji,
+                    default=self.selected_emoji == emoji,
+                )
                 for index, emoji in enumerate(page_items)
             ]
-        self.add_item(EmojiSelector(options=emoji_options))
+        self.add_item(EmojiSelector(options=emoji_options, category_name=category_name))
 
         remove_options = [
             discord.SelectOption(
                 label=f'{entry.display_emoji} Rolle {position}: {entry.role_id}',
                 value=str(position - 1),
                 emoji=entry.display_emoji,
+                default=self.selected_remove_index == (position - 1),
             )
             for position, entry in enumerate(self.draft.entries, start=1)
         ]
         if remove_options:
             self.add_item(EntryRemoveSelector(options=remove_options[:25]))
 
-        self.add_item(self.switch_source_button)
         self.add_item(self.prev_page_button)
         self.add_item(self.next_page_button)
         self.add_item(self.add_button)
@@ -143,10 +149,11 @@ class RolePanelSetupView(discord.ui.View):
         self.add_item(self.save_button)
         self.add_item(self.cancel_button)
 
-        self.switch_source_button.label = f'Emoji-Quelle: {"Standard" if self.source == "standard" else "Server"}'
         self.remove_button.disabled = not self.draft.entries
         self.prev_page_button.disabled = self.page_count <= 1
         self.next_page_button.disabled = self.page_count <= 1
+        self.prev_page_button.label = '◀ Symbole' if self.page == 1 else '◀'
+        self.next_page_button.label = 'Farben ▶' if self.page == 0 else '▶'
 
     def _render_overview(self) -> str:
         lines = [
@@ -163,13 +170,6 @@ class RolePanelSetupView(discord.ui.View):
                 lines.append(f'{position}. {entry.display_emoji} <@&{entry.role_id}>')
         return '\n'.join(lines)
 
-    @discord.ui.button(label='Emoji-Quelle: Standard', style=discord.ButtonStyle.secondary, row=3)
-    async def switch_source_button(self, interaction: discord.Interaction, _: discord.ui.Button['RolePanelSetupView']) -> None:
-        self.source = 'custom' if self.source == 'standard' else 'standard'
-        self.page = 0
-        self._rebuild_components()
-        await interaction.response.edit_message(content=self._render_overview(), view=self)
-
     @discord.ui.button(label='◀', style=discord.ButtonStyle.secondary, row=3)
     async def prev_page_button(self, interaction: discord.Interaction, _: discord.ui.Button['RolePanelSetupView']) -> None:
         self.page = (self.page - 1) % self.page_count
@@ -184,7 +184,8 @@ class RolePanelSetupView(discord.ui.View):
 
     @discord.ui.button(label='+ Hinzufügen', style=discord.ButtonStyle.success, row=4)
     async def add_button(self, interaction: discord.Interaction, _: discord.ui.Button['RolePanelSetupView']) -> None:
-        if self.selected_role is None:
+        selected_role = self.guild.get_role(self.selected_role_id) if self.selected_role_id else self.selected_role
+        if selected_role is None:
             await interaction.response.send_message('❌ Bitte zuerst eine Rolle auswählen.', ephemeral=True)
             return
         if not self.selected_emoji:
@@ -195,13 +196,13 @@ class RolePanelSetupView(discord.ui.View):
         if any(entry.emoji_key == emoji_key for entry in self.draft.entries):
             await interaction.response.send_message('❌ Dieses Emoji wird bereits verwendet.', ephemeral=True)
             return
-        if any(entry.role_id == self.selected_role.id for entry in self.draft.entries):
+        if any(entry.role_id == selected_role.id for entry in self.draft.entries):
             await interaction.response.send_message('❌ Diese Rolle wurde bereits hinzugefügt.', ephemeral=True)
             return
 
         self.draft.entries.append(
             DraftRoleEntry(
-                role_id=self.selected_role.id,
+                role_id=selected_role.id,
                 emoji_key=emoji_key,
                 display_emoji=display_emoji,
             )
@@ -229,7 +230,8 @@ class RolePanelSetupView(discord.ui.View):
 
     @discord.ui.button(label='Speichern', style=discord.ButtonStyle.primary, row=4)
     async def save_button(self, interaction: discord.Interaction, _: discord.ui.Button['RolePanelSetupView']) -> None:
-        if not self.draft.entries:
+        role_count = sum(1 for entry in self.draft.entries if entry.role_id and entry.emoji_key)
+        if role_count < 1:
             await interaction.response.send_message('❌ Bitte mindestens eine Rolle hinzufügen.', ephemeral=True)
             return
 
