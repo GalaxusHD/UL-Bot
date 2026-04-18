@@ -17,6 +17,10 @@ COLOR_EMOJIS = [
     '🔴', '🟠', '🟡', '🟢', '🔵', '🟣', '🟤', '⚫', '⚪',
     '🟥', '🟧', '🟨', '🟩', '🟦', '🟪', '🟫', '⬛', '⬜',
 ]
+EMOJI_CATEGORIES = [
+    ('Symbole', SYMBOL_EMOJIS),
+    ('Farben', COLOR_EMOJIS),
+]
 
 
 def normalise_emoji(emoji_value: str) -> tuple[str, str]:
@@ -98,13 +102,12 @@ class RolePanelSetupView(discord.ui.View):
 
     @property
     def source_items(self) -> list[str]:
-        if self.page == 1:
-            return COLOR_EMOJIS
-        return SYMBOL_EMOJIS
+        _, items = EMOJI_CATEGORIES[self.page]
+        return items
 
     @property
     def page_count(self) -> int:
-        return 2
+        return len(EMOJI_CATEGORIES)
 
     def _rebuild_components(self) -> None:
         self.clear_items()
@@ -115,7 +118,7 @@ class RolePanelSetupView(discord.ui.View):
 
         items = self.source_items
         page_items = items[:25]
-        category_name = 'Symbole' if self.page == 0 else 'Farben'
+        category_name, _ = EMOJI_CATEGORIES[self.page]
         if not page_items:
             emoji_options = [discord.SelectOption(label='Keine Emojis verfügbar', value='❌', emoji='❌')]
         else:
