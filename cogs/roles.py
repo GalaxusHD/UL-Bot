@@ -432,7 +432,7 @@ class Roles(commands.Cog):
         description_blocks = [draft.description.strip()] if draft.description.strip() else []
         description_blocks.append(role_lines)
         parsed_colour = parse_embed_colour(draft.embed_colour)
-        embed_colour = parsed_colour[1] if parsed_colour is not None else discord.Color.blurple()
+        embed_colour = parsed_colour[1] if parsed_colour is not None else discord.Colour.blurple()
         embed = discord.Embed(
             title=draft.title,
             description='\n\n'.join(description_blocks),
@@ -626,24 +626,8 @@ class Roles(commands.Cog):
         try:
             if add_role:
                 channel = guild.get_channel(int(row['channel_id']))
-                if isinstance(channel, discord.TextChannel):
-                    try:
-                        message = await channel.fetch_message(payload.message_id)
-                        for panel_role in panel_roles:
-                            panel_emoji = str(panel_role['emoji'])
-                            if panel_emoji == emoji_key:
-                                continue
-                            maybe_role = guild.get_role(int(panel_role['role_id']))
-                            if maybe_role is None or maybe_role not in member.roles:
-                                continue
-                            try:
-                                await message.remove_reaction(str(panel_role['display_emoji']), member)
-                            except (discord.NotFound, discord.Forbidden, discord.HTTPException):
-                                continue
-                    except (discord.NotFound, discord.Forbidden, discord.HTTPException):
-                        pass
-
                 roles_to_remove: list[discord.Role] = []
+                reactions_to_remove: list[str] = []
                 for panel_role in panel_roles:
                     panel_role_id = int(panel_role['role_id'])
                     if panel_role_id == role.id:
@@ -651,6 +635,19 @@ class Roles(commands.Cog):
                     maybe_role = guild.get_role(panel_role_id)
                     if maybe_role is not None and maybe_role in member.roles:
                         roles_to_remove.append(maybe_role)
+                        reactions_to_remove.append(str(panel_role['display_emoji']))
+
+                if isinstance(channel, discord.TextChannel) and reactions_to_remove:
+                    try:
+                        message = await channel.fetch_message(payload.message_id)
+                        for display_emoji in reactions_to_remove:
+                            try:
+                                await message.remove_reaction(display_emoji, member)
+                            except (discord.NotFound, discord.Forbidden, discord.HTTPException):
+                                continue
+                    except (discord.NotFound, discord.Forbidden, discord.HTTPException):
+                        pass
+
                 if roles_to_remove:
                     await member.remove_roles(*roles_to_remove, reason='Role selector exclusive reaction')
                 await member.add_roles(role, reason='Role selector reaction')

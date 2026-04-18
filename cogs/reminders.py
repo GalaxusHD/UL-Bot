@@ -125,7 +125,7 @@ class Reminders(commands.Cog):
 
     @tasks.loop(minutes=1)
     async def daily_reminder_scheduler(self) -> None:
-        now = datetime.now(timezone.utc)
+        now = datetime.now(tz=timezone.utc)
         day_key = now.strftime('%Y-%m-%d')
 
         with sqlite3.connect(DB_FILE) as conn:
