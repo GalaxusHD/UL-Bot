@@ -233,7 +233,7 @@ class RolePanelSetupView(discord.ui.View):
 
     @discord.ui.button(label='Speichern', style=discord.ButtonStyle.primary, row=4)
     async def save_button(self, interaction: discord.Interaction, _: discord.ui.Button['RolePanelSetupView']) -> None:
-        role_count = sum(1 for entry in self.draft.entries if entry.role_id and entry.emoji_key)
+        role_count = len(self.draft.entries)
         if role_count < 1:
             await interaction.response.send_message('❌ Bitte mindestens eine Rolle hinzufügen.', ephemeral=True)
             return
