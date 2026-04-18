@@ -109,7 +109,7 @@ class ReminderModal(discord.ui.Modal, title='24h Reminder konfigurieren'):
 
             row = conn.execute(
                 '''
-                SELECT id
+                SELECT id, hour, minute, last_sent_date
                 FROM reminders
                 WHERE guild_id = ? AND LOWER(title) = LOWER(?)
                 LIMIT 1
@@ -123,13 +123,17 @@ class ReminderModal(discord.ui.Modal, title='24h Reminder konfigurieren'):
                 )
                 return
 
+            last_sent_date: str | None = None
+            if int(row['hour']) == hour and int(row['minute']) == minute:
+                last_sent_date = None if row['last_sent_date'] is None else str(row['last_sent_date'])
+
             conn.execute(
                 '''
                 UPDATE reminders
-                SET hour = ?, minute = ?, message = ?, last_sent_date = NULL
+                SET hour = ?, minute = ?, message = ?, last_sent_date = ?
                 WHERE id = ?
                 ''',
-                (hour, minute, message, int(row['id'])),
+                (hour, minute, message, last_sent_date, int(row['id'])),
             )
             conn.commit()
 
@@ -285,19 +289,22 @@ class Reminders(commands.Cog):
         now = datetime.now(tz=timezone.utc)
         check_window_start = now - timedelta(seconds=60)
         day_key = now.strftime('%Y-%m-%d')
+        # The loop runs every 20s and checks the previous 60s window so reminders still fire
+        # when task execution drifts across minute boundaries.
         now_slot = now.hour * 60 + now.minute
         start_slot = check_window_start.hour * 60 + check_window_start.minute
+        candidate_slots = sorted({start_slot, now_slot})
 
         with sqlite3.connect(DB_FILE) as conn:
             conn.row_factory = sqlite3.Row
-            if now_slot == start_slot:
+            if len(candidate_slots) == 1:
                 rows = conn.execute(
                     '''
                     SELECT id, guild_id, channel_id, hour, minute, message, last_sent_date
                     FROM reminders
                     WHERE (hour * 60 + minute) = ?
                     ''',
-                    (now_slot,),
+                    (candidate_slots[0],),
                 ).fetchall()
             else:
                 rows = conn.execute(
@@ -306,7 +313,7 @@ class Reminders(commands.Cog):
                     FROM reminders
                     WHERE (hour * 60 + minute) IN (?, ?)
                     ''',
-                    (start_slot, now_slot),
+                    (candidate_slots[0], candidate_slots[1]),
                 ).fetchall()
 
         for row in rows:

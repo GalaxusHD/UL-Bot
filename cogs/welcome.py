@@ -8,7 +8,7 @@ from discord.ext import commands
 from database import DB_FILE
 
 HEX_COLOR_PATTERN = re.compile(r'^#[0-9A-Fa-f]{6}$')
-ROLE_ID_PATTERN = re.compile(r'^\s*<@&(?P<id>\d+)>\s*$|^\s*(?P<id_plain>\d+)\s*$')
+ROLE_ID_PATTERN = re.compile(r'^\s*(?:<@&)?(?P<id>\d+)>?\s*$')
 
 
 class WelcomeModal(discord.ui.Modal, title='Welcome konfigurieren'):
@@ -83,7 +83,7 @@ class WelcomeModal(discord.ui.Modal, title='Welcome konfigurieren'):
         match = ROLE_ID_PATTERN.match(normalized)
         if not match:
             raise ValueError('❌ Rolle muss eine Role-ID oder ein @Rollen-Mention sein.')
-        role_id_value = match.group('id') or match.group('id_plain')
+        role_id_value = match.group('id')
         if role_id_value is None:
             raise ValueError('❌ Rolle konnte nicht gelesen werden.')
         return int(role_id_value)
