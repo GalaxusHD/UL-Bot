@@ -187,6 +187,23 @@ def init_database() -> None:
         '''
     )
 
+    cursor.execute(
+        '''
+        CREATE TABLE IF NOT EXISTS welcome_messages (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            guild_id INTEGER NOT NULL,
+            channel_id INTEGER NOT NULL,
+            message TEXT NOT NULL,
+            embed_flag INTEGER NOT NULL DEFAULT 0,
+            color TEXT,
+            role_id INTEGER,
+            dm_flag INTEGER NOT NULL DEFAULT 0,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )
+        '''
+    )
+
     cursor.execute('CREATE INDEX IF NOT EXISTS idx_birthdays_date ON birthdays (month, day)')
     cursor.execute('CREATE INDEX IF NOT EXISTS idx_birthdays_lookup ON birthdays (guild_id, user_id)')
     cursor.execute('CREATE INDEX IF NOT EXISTS idx_text_messages_guild_title ON text_messages (guild_id, title)')
@@ -198,6 +215,8 @@ def init_database() -> None:
     cursor.execute('CREATE INDEX IF NOT EXISTS idx_role_message_roles_lookup ON role_message_roles (role_message_id, emoji)')
     cursor.execute('CREATE UNIQUE INDEX IF NOT EXISTS idx_reminders_unique_guild_title ON reminders (guild_id, title COLLATE NOCASE)')
     cursor.execute('CREATE INDEX IF NOT EXISTS idx_reminders_schedule_lookup ON reminders (hour, minute)')
+    cursor.execute('CREATE UNIQUE INDEX IF NOT EXISTS idx_welcome_unique_guild_channel ON welcome_messages (guild_id, channel_id)')
+    cursor.execute('CREATE INDEX IF NOT EXISTS idx_welcome_guild_lookup ON welcome_messages (guild_id)')
 
     conn.commit()
     conn.close()
