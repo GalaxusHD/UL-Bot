@@ -216,6 +216,60 @@ class Birthdays(commands.Cog):
 
         await interaction.response.send_message(f'✅ Geburtstagsrolle gesetzt: {role.mention}', ephemeral=True)
 
+    @app_commands.command(name='geburtstag_check', description='Prüfe manuell, ob heute Geburtstage anstehen')
+    @app_commands.default_permissions(administrator=True)
+    async def geburtstag_check(self, interaction: discord.Interaction) -> None:
+        if interaction.guild is None:
+            await interaction.response.send_message('❌ Dieser Befehl ist nur auf Servern verfügbar.', ephemeral=True)
+            return
+        if not interaction.user.guild_permissions.administrator:
+            await interaction.response.send_message('❌ Du brauchst Administrator-Rechte!', ephemeral=True)
+            return
+
+        now = datetime.now(self.timezone)
+        day_key = now.strftime('%Y-%m-%d')
+
+        with self._conn() as conn:
+            settings = conn.execute(
+                '''
+                SELECT role_id, list_channel_id, last_announce_date
+                FROM birthday_settings
+                WHERE guild_id = ?
+                LIMIT 1
+                ''',
+                (interaction.guild.id,),
+            ).fetchone()
+            rows = conn.execute(
+                'SELECT user_id FROM birthdays WHERE guild_id = ? AND day = ? AND month = ?',
+                (interaction.guild.id, now.day, now.month),
+            ).fetchall()
+
+        if settings is None or settings['list_channel_id'] is None:
+            await interaction.response.send_message(
+                '❌ Keine Geburtstagsliste eingerichtet. Nutze zuerst /geburtstag_liste.',
+                ephemeral=True,
+            )
+            return
+
+        if not rows:
+            await interaction.response.send_message('ℹ️ Heute hat niemand Geburtstag.', ephemeral=True)
+            return
+
+        if settings['last_announce_date'] == day_key:
+            await interaction.response.send_message('ℹ️ Geburtstagsnachricht wurde heute bereits gesendet.', ephemeral=True)
+            return
+
+        role_id = int(settings['role_id']) if settings['role_id'] else None
+        await interaction.response.defer(ephemeral=True)
+        announced = await self._announce_birthdays(interaction.guild, role_id, settings, day_key)
+        if announced:
+            await interaction.followup.send('✅ Geburtstagscheck durchgeführt und Nachricht gesendet.', ephemeral=True)
+        else:
+            await interaction.followup.send(
+                '❌ Es konnten keine Geburtstage angekündigt werden (Liste/Channel prüfen).',
+                ephemeral=True,
+            )
+
     def upsert_birthday(
         self,
         guild_id: int,
@@ -422,7 +476,7 @@ class Birthdays(commands.Cog):
         role_id: int | None,
         settings: sqlite3.Row | None,
         day_key: str,
-    ) -> None:
+    ) -> bool:
         now = datetime.now(self.timezone)
         with self._conn() as conn:
             rows = conn.execute(
@@ -436,18 +490,22 @@ class Birthdays(commands.Cog):
             if member is not None:
                 birthday_members.append(member)
 
+        if not birthday_members:
+            return False
+
         target_channel: discord.TextChannel | None = None
         if settings and settings['list_channel_id'] is not None:
             maybe_channel = guild.get_channel(int(settings['list_channel_id']))
             if isinstance(maybe_channel, discord.TextChannel):
                 target_channel = maybe_channel
-        if target_channel is None and isinstance(guild.system_channel, discord.TextChannel):
-            target_channel = guild.system_channel
 
         current_message_id: int | None = None
         current_message_channel_id: int | None = None
 
-        if birthday_members and target_channel is not None:
+        if target_channel is None:
+            return False
+
+        if birthday_members:
             mentions = ', '.join(member.mention for member in birthday_members)
             text = f'Das gesamte UL Team wünscht {mentions} alles Gute zum Geburtstag!'
             try:
@@ -455,8 +513,7 @@ class Birthdays(commands.Cog):
                 current_message_id = sent_message.id
                 current_message_channel_id = target_channel.id
             except (discord.Forbidden, discord.HTTPException):
-                current_message_id = None
-                current_message_channel_id = None
+                return False
 
         if role_id is not None:
             role = guild.get_role(role_id)
@@ -480,6 +537,7 @@ class Birthdays(commands.Cog):
                 (guild.id, current_message_id, current_message_channel_id, day_key),
             )
             conn.commit()
+        return True
 
     async def _cleanup_birthdays(
         self,
