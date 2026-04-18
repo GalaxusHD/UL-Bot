@@ -10,9 +10,10 @@ from database import DB_FILE
 
 MAX_MENTION_NAME_LENGTH = 32
 MEMBER_QUERY_LIMIT = 10
-MENTION_PATTERN = re.compile(r'<@!?(?P<id>\d+)>|(?<![\w.])@(?P<name>[A-Za-z0-9_.-]{{2,{max_len}}})\b'.format(
-    max_len=MAX_MENTION_NAME_LENGTH
-))
+EMBED_DESCRIPTION_MAX_LENGTH = 4096
+MENTION_PATTERN = re.compile(
+    rf'<@!?(?P<id>\d+)>|(?<![\w.])@(?P<name>[A-Za-z0-9_.-]{{2,{MAX_MENTION_NAME_LENGTH}}})\b'
+)
 
 
 class TextMessageModal(discord.ui.Modal):
@@ -183,7 +184,7 @@ class TextMessageModal(discord.ui.Modal):
 class TextMessages(commands.Cog):
     text = app_commands.Group(name='text', description='Verwalte Text-Nachrichten')
 
-    def __init__(self, bot):
+    def __init__(self, bot: commands.Bot) -> None:
         self.bot = bot
 
     @staticmethod
@@ -203,11 +204,6 @@ class TextMessages(commands.Cog):
 
     @staticmethod
     def _parse_colour(colour: str | None) -> discord.Colour:
-        if colour:
-            normalised = colour.strip()
-            if re.fullmatch(r'#[0-9a-fA-F]{6}', normalised):
-                return discord.Colour(int(normalised[1:], 16))
-
         colour_map = {
             'red': discord.Colour.red(),
             'blue': discord.Colour.blue(),
@@ -505,21 +501,22 @@ class TextMessages(commands.Cog):
             await interaction.response.send_message('ℹ️ Keine gespeicherten Text-Nachrichten gefunden.', ephemeral=True)
             return
 
-        max_description_length = 4096
+        max_description_length = EMBED_DESCRIPTION_MAX_LENGTH
         lines = [f'• `{row["title"]}`' for row in rows]
         description = '\n'.join(lines)
         if len(description) > max_description_length:
-            newline_length = 1
             fitting_lines = []
-            current_length = 0
-            for line in lines:
-                additional_length = len(line) + (newline_length if fitting_lines else 0)
-                if current_length + additional_length > max_description_length - 40:
+            for line_index, line in enumerate(lines):
+                remaining_after_line = len(lines) - (line_index + 1)
+                suffix = f'\n… und {remaining_after_line} weitere' if remaining_after_line > 0 else ''
+                candidate_lines = fitting_lines + [line]
+                candidate_description = '\n'.join(candidate_lines) + suffix
+                if len(candidate_description) > max_description_length:
                     break
                 fitting_lines.append(line)
-                current_length += additional_length
             remaining = len(lines) - len(fitting_lines)
-            description = '\n'.join(fitting_lines) + f'\n… und {remaining} weitere'
+            suffix = f'\n… und {remaining} weitere' if remaining > 0 else ''
+            description = '\n'.join(fitting_lines) + suffix
 
         embed = discord.Embed(
             title='📝 Gespeicherte Nachrichten',
@@ -530,5 +527,5 @@ class TextMessages(commands.Cog):
         await interaction.response.send_message(embed=embed, ephemeral=True)
 
 
-async def setup(bot):
+async def setup(bot: commands.Bot) -> None:
     await bot.add_cog(TextMessages(bot))
