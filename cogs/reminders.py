@@ -285,14 +285,32 @@ class Reminders(commands.Cog):
         now = datetime.now(tz=timezone.utc)
         check_window_start = now - timedelta(seconds=60)
         day_key = now.strftime('%Y-%m-%d')
+        minute_cursor = check_window_start.replace(second=0, microsecond=0)
+        minute_end = now.replace(second=0, microsecond=0)
+        due_slots: list[tuple[int, int]] = []
+        while minute_cursor <= minute_end:
+            slot = (minute_cursor.hour, minute_cursor.minute)
+            if slot not in due_slots:
+                due_slots.append(slot)
+            minute_cursor += timedelta(minutes=1)
+
+        if not due_slots:
+            return
+
+        where_clause = ' OR '.join(['(hour = ? AND minute = ?)'] * len(due_slots))
+        query_params: list[int] = []
+        for hour_value, minute_value in due_slots:
+            query_params.extend([hour_value, minute_value])
 
         with sqlite3.connect(DB_FILE) as conn:
             conn.row_factory = sqlite3.Row
             rows = conn.execute(
-                '''
+                f'''
                 SELECT id, guild_id, channel_id, hour, minute, message, last_sent_date
                 FROM reminders
+                WHERE {where_clause}
                 ''',
+                query_params,
             ).fetchall()
 
         for row in rows:
@@ -302,6 +320,8 @@ class Reminders(commands.Cog):
                 continue
 
             due_at = now.replace(hour=hour, minute=minute, second=0, microsecond=0)
+            if due_at > now:
+                due_at -= timedelta(days=1)
             if due_at < check_window_start or due_at > now:
                 continue
             if row['last_sent_date'] == day_key:

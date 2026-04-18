@@ -53,7 +53,7 @@ class WelcomeModal(discord.ui.Modal, title='Welcome konfigurieren'):
             default='' if initial_role_id is None else str(initial_role_id),
         )
         self.dm_input = discord.ui.TextInput(
-            label='DM an neue Member senden? (yes/no)',
+            label='DM an neue Member senden? (yes/no, leer = no)',
             placeholder='yes oder no',
             required=False,
             max_length=3,
