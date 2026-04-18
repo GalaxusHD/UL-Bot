@@ -405,12 +405,16 @@ class Roles(commands.Cog):
                 (int(panel_row['id']),),
             ).fetchall()
 
+        raw_colour = str(panel_row['color'] or 'blurple')
+        parsed_colour = parse_embed_colour(raw_colour)
+        embed_colour = parsed_colour[0] if parsed_colour is not None else 'blurple'
+
         return RolePanelDraft(
             guild_id=int(panel_row['guild_id']),
             title=str(panel_row['title']),
             channel_id=int(panel_row['channel_id']),
             description=str(panel_row['description'] or ''),
-            embed_colour=(parse_embed_colour(str(panel_row['color'] or 'blurple')) or ('blurple', discord.Color.blurple()))[0],
+            embed_colour=embed_colour,
             panel_id=int(panel_row['id']),
             message_id=int(panel_row['message_id']),
             entries=[
@@ -628,6 +632,9 @@ class Roles(commands.Cog):
                         for panel_role in panel_roles:
                             panel_emoji = str(panel_role['emoji'])
                             if panel_emoji == emoji_key:
+                                continue
+                            maybe_role = guild.get_role(int(panel_role['role_id']))
+                            if maybe_role is None or maybe_role not in member.roles:
                                 continue
                             try:
                                 await message.remove_reaction(str(panel_role['display_emoji']), member)
