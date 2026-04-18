@@ -16,6 +16,8 @@ TABLE_INFO_SQL = {
     'role_messages': 'PRAGMA table_info(role_messages)',
     'role_message_roles': 'PRAGMA table_info(role_message_roles)',
     'reminders': 'PRAGMA table_info(reminders)',
+    'user_xp': 'PRAGMA table_info(user_xp)',
+    'admin_logs': 'PRAGMA table_info(admin_logs)',
 }
 ALTER_COLUMN_SQL = {
     ('birthdays', 'username', "TEXT NOT NULL DEFAULT '@unknown'"):
@@ -204,6 +206,32 @@ def init_database() -> None:
         '''
     )
 
+    cursor.execute(
+        '''
+        CREATE TABLE IF NOT EXISTS user_xp (
+            guild_id INTEGER NOT NULL,
+            user_id INTEGER NOT NULL,
+            text_xp INTEGER NOT NULL DEFAULT 0,
+            voice_xp INTEGER NOT NULL DEFAULT 0,
+            last_text_xp_at TEXT,
+            PRIMARY KEY (guild_id, user_id)
+        )
+        '''
+    )
+
+    cursor.execute(
+        '''
+        CREATE TABLE IF NOT EXISTS admin_logs (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            guild_id INTEGER NOT NULL,
+            author_id INTEGER NOT NULL,
+            person TEXT NOT NULL,
+            description TEXT NOT NULL,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )
+        '''
+    )
+
     cursor.execute('CREATE INDEX IF NOT EXISTS idx_birthdays_date ON birthdays (month, day)')
     cursor.execute('CREATE INDEX IF NOT EXISTS idx_birthdays_lookup ON birthdays (guild_id, user_id)')
     cursor.execute('CREATE INDEX IF NOT EXISTS idx_text_messages_guild_title ON text_messages (guild_id, title)')
@@ -217,6 +245,9 @@ def init_database() -> None:
     cursor.execute('CREATE INDEX IF NOT EXISTS idx_reminders_schedule_lookup ON reminders (hour, minute)')
     cursor.execute('CREATE UNIQUE INDEX IF NOT EXISTS idx_welcome_unique_guild_channel ON welcome_messages (guild_id, channel_id)')
     cursor.execute('CREATE INDEX IF NOT EXISTS idx_welcome_guild_lookup ON welcome_messages (guild_id)')
+    cursor.execute('CREATE INDEX IF NOT EXISTS idx_user_xp_guild_text ON user_xp (guild_id, text_xp DESC)')
+    cursor.execute('CREATE INDEX IF NOT EXISTS idx_user_xp_guild_voice ON user_xp (guild_id, voice_xp DESC)')
+    cursor.execute('CREATE INDEX IF NOT EXISTS idx_admin_logs_guild_lookup ON admin_logs (guild_id, id)')
 
     conn.commit()
     conn.close()
