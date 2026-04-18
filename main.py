@@ -49,12 +49,12 @@ async def reload_bot(interaction: discord.Interaction) -> None:
         await interaction.response.send_message('❌ Du brauchst Administrator-Rechte!', ephemeral=True)
         return
 
-    await interaction.response.defer(ephemeral=True, thinking=True)
+    await interaction.response.defer(ephemeral=True)
     status_lines: list[str] = []
     had_errors = False
 
     try:
-        loaded_extensions = [name for name in list(bot.extensions.keys()) if name.startswith('cogs.')]
+        loaded_extensions = [name for name in bot.extensions.keys() if name.startswith('cogs.')]
         for extension in loaded_extensions:
             await bot.unload_extension(extension)
         await load_cogs()
@@ -88,8 +88,17 @@ async def reload_bot(interaction: discord.Interaction) -> None:
         try:
             if birthdays_cog.daily_scheduler.is_running():
                 birthdays_cog.daily_scheduler.cancel()
-            birthdays_cog.daily_scheduler.start()
-            status_lines.append('✅ Birthday-Scheduler wurde neu gestartet.')
+                for _ in range(10):
+                    if not birthdays_cog.daily_scheduler.is_running():
+                        break
+                    await asyncio.sleep(0.1)
+
+            if not birthdays_cog.daily_scheduler.is_running():
+                birthdays_cog.daily_scheduler.start()
+                status_lines.append('✅ Birthday-Scheduler wurde neu gestartet.')
+            else:
+                had_errors = True
+                status_lines.append('❌ Birthday-Scheduler konnte nicht neu gestartet werden.')
         except Exception as exc:
             had_errors = True
             status_lines.append(f'❌ Fehler beim Neustarten des Schedulers: {exc}')
