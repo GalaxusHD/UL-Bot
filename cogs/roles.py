@@ -126,7 +126,7 @@ class RolePanelSetupView(discord.ui.View):
 
         remove_options = [
             discord.SelectOption(
-                label=f'{entry.display_emoji} Role {position}: {entry.role_id}',
+                label=f'{entry.display_emoji} Rolle {position}: {entry.role_id}',
                 value=str(position - 1),
                 emoji=entry.display_emoji,
             )
@@ -258,7 +258,7 @@ class RolePanelSetupView(discord.ui.View):
         self.stop()
 
 
-class RoleSetupModal(discord.ui.Modal, title='Role Setup'):
+class RoleSetupModal(discord.ui.Modal, title='Rollen-Setup'):
     description = discord.ui.TextInput(
         label='Beschreibung',
         placeholder='Beschreibung für das Rollen-Panel',
