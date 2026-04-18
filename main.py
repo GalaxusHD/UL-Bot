@@ -24,7 +24,7 @@ async def ping(ctx: commands.Context) -> None:
 
 
 async def load_cogs() -> None:
-    required_cogs = {'birthdays', 'text_messages', 'roles', 'voice_management'}
+    required_cogs = {'birthdays', 'text_messages', 'roles', 'voice_management', 'reminders'}
     loaded_cogs = set()
 
     for filename in os.listdir('./cogs'):

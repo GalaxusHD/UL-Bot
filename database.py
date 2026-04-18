@@ -7,6 +7,7 @@ ALLOWED_COLUMN_DEFINITIONS = {
     'TEXT',
     'INTEGER',
     'INTEGER NOT NULL DEFAULT 1',
+    'INTEGER NOT NULL DEFAULT 0',
     "TEXT NOT NULL DEFAULT 'blurple'",
 }
 TABLE_INFO_SQL = {
@@ -15,6 +16,7 @@ TABLE_INFO_SQL = {
     'text_messages': 'PRAGMA table_info(text_messages)',
     'role_messages': 'PRAGMA table_info(role_messages)',
     'role_message_roles': 'PRAGMA table_info(role_message_roles)',
+    'reminders': 'PRAGMA table_info(reminders)',
 }
 ALTER_COLUMN_SQL = {
     ('birthdays', 'username', "TEXT NOT NULL DEFAULT '@unknown'"):
@@ -39,6 +41,10 @@ ALTER_COLUMN_SQL = {
         'ALTER TABLE text_messages ADD COLUMN message_id INTEGER',
     ('role_message_roles', 'color', "TEXT NOT NULL DEFAULT 'blurple'"):
         "ALTER TABLE role_message_roles ADD COLUMN color TEXT NOT NULL DEFAULT 'blurple'",
+    ('role_messages', 'description', "TEXT NOT NULL DEFAULT ''"):
+        "ALTER TABLE role_messages ADD COLUMN description TEXT NOT NULL DEFAULT ''",
+    ('role_messages', 'color', "TEXT NOT NULL DEFAULT 'blurple'"):
+        "ALTER TABLE role_messages ADD COLUMN color TEXT NOT NULL DEFAULT 'blurple'",
 }
 
 
@@ -140,10 +146,14 @@ def init_database() -> None:
             title TEXT NOT NULL,
             channel_id INTEGER NOT NULL,
             message_id INTEGER NOT NULL,
+            description TEXT NOT NULL DEFAULT '',
+            color TEXT NOT NULL DEFAULT 'blurple',
             created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
         )
         '''
     )
+    _ensure_column(cursor, 'role_messages', 'description', "TEXT NOT NULL DEFAULT ''")
+    _ensure_column(cursor, 'role_messages', 'color', "TEXT NOT NULL DEFAULT 'blurple'")
 
     cursor.execute(
         '''
@@ -162,6 +172,22 @@ def init_database() -> None:
     )
     _ensure_column(cursor, 'role_message_roles', 'color', "TEXT NOT NULL DEFAULT 'blurple'")
 
+    cursor.execute(
+        '''
+        CREATE TABLE IF NOT EXISTS reminders (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            guild_id INTEGER NOT NULL,
+            channel_id INTEGER NOT NULL,
+            title TEXT NOT NULL,
+            hour INTEGER NOT NULL,
+            minute INTEGER NOT NULL,
+            message TEXT NOT NULL,
+            last_sent_date TEXT,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )
+        '''
+    )
+
     cursor.execute('CREATE INDEX IF NOT EXISTS idx_birthdays_date ON birthdays (month, day)')
     cursor.execute('CREATE INDEX IF NOT EXISTS idx_birthdays_lookup ON birthdays (guild_id, user_id)')
     cursor.execute('CREATE INDEX IF NOT EXISTS idx_text_messages_guild_title ON text_messages (guild_id, title)')
@@ -171,6 +197,8 @@ def init_database() -> None:
     cursor.execute('CREATE INDEX IF NOT EXISTS idx_role_messages_lookup ON role_messages (guild_id, message_id)')
     cursor.execute('CREATE UNIQUE INDEX IF NOT EXISTS idx_role_messages_unique_title ON role_messages (guild_id, title COLLATE NOCASE)')
     cursor.execute('CREATE INDEX IF NOT EXISTS idx_role_message_roles_lookup ON role_message_roles (role_message_id, emoji)')
+    cursor.execute('CREATE UNIQUE INDEX IF NOT EXISTS idx_reminders_unique_guild_title ON reminders (guild_id, title COLLATE NOCASE)')
+    cursor.execute('CREATE INDEX IF NOT EXISTS idx_reminders_schedule_lookup ON reminders (hour, minute)')
 
     conn.commit()
     conn.close()
