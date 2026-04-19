@@ -8,6 +8,9 @@ from discord.ext import commands, tasks
 
 from database import DB_FILE
 
+MINUTES_PER_DAY = 24 * 60
+PRE_DELETE_MINUTES = 1
+
 
 class ReminderModal(discord.ui.Modal, title='24h Reminder konfigurieren'):
     def __init__(
@@ -175,6 +178,15 @@ class Reminders(commands.Cog):
         except (discord.Forbidden, discord.HTTPException):
             return False
 
+    def _get_reminder_channel(self, guild_id: int, channel_id: int) -> discord.TextChannel | None:
+        guild = self.bot.get_guild(guild_id)
+        if guild is None:
+            return None
+        channel = guild.get_channel(channel_id)
+        if isinstance(channel, discord.TextChannel):
+            return channel
+        return None
+
     async def _title_autocomplete(
         self,
         interaction: discord.Interaction,
@@ -323,9 +335,17 @@ class Reminders(commands.Cog):
                     SELECT id, guild_id, channel_id, hour, minute, message, last_sent_date, last_message_id, last_pin_date
                     FROM reminders
                     WHERE (hour * 60 + minute) = ?
-                       OR ((hour * 60 + minute + 1439) % 1440) = ?
+                       -- Also include reminders where "due time - 1 minute" matches this slot,
+                       -- so old tracked messages can be deleted before the new daily pin.
+                       OR ((hour * 60 + minute - ? + ?) % ?) = ?
                     ''',
-                    (candidate_slots[0], candidate_slots[0]),
+                    (
+                        candidate_slots[0],
+                        PRE_DELETE_MINUTES,
+                        MINUTES_PER_DAY,
+                        MINUTES_PER_DAY,
+                        candidate_slots[0],
+                    ),
                 ).fetchall()
             else:
                 rows = conn.execute(
@@ -333,9 +353,17 @@ class Reminders(commands.Cog):
                     SELECT id, guild_id, channel_id, hour, minute, message, last_sent_date, last_message_id, last_pin_date
                     FROM reminders
                     WHERE (hour * 60 + minute) IN (?, ?)
-                       OR ((hour * 60 + minute + 1439) % 1440) IN (?, ?)
+                       OR ((hour * 60 + minute - ? + ?) % ?) IN (?, ?)
                     ''',
-                    (candidate_slots[0], candidate_slots[1], candidate_slots[0], candidate_slots[1]),
+                    (
+                        candidate_slots[0],
+                        candidate_slots[1],
+                        PRE_DELETE_MINUTES,
+                        MINUTES_PER_DAY,
+                        MINUTES_PER_DAY,
+                        candidate_slots[0],
+                        candidate_slots[1],
+                    ),
                 ).fetchall()
 
         for row in rows:
@@ -355,25 +383,18 @@ class Reminders(commands.Cog):
             reminder_id = int(row['id'])
             last_message_id = None if row['last_message_id'] is None else int(row['last_message_id'])
             last_pin_date = None if row['last_pin_date'] is None else str(row['last_pin_date'])
+            channel = self._get_reminder_channel(int(row['guild_id']), int(row['channel_id']))
 
             if (
                 last_message_id is not None
                 and last_pin_date != day_key
                 and check_window_start <= pre_delete_at <= now
             ):
-                guild = self.bot.get_guild(int(row['guild_id']))
-                if guild is not None:
-                    channel = guild.get_channel(int(row['channel_id']))
-                    if isinstance(channel, discord.TextChannel):
-                        if await self._delete_tracked_message(channel, last_message_id):
-                            self._clear_last_reminder_message(reminder_id)
-                            last_message_id = None
+                if channel is not None and await self._delete_tracked_message(channel, last_message_id):
+                    self._clear_last_reminder_message(reminder_id)
+                    last_message_id = None
 
-            guild = self.bot.get_guild(int(row['guild_id']))
-            if guild is None:
-                continue
-            channel = guild.get_channel(int(row['channel_id']))
-            if not isinstance(channel, discord.TextChannel):
+            if channel is None:
                 continue
 
             if due_at < check_window_start or due_at > now:
@@ -382,6 +403,8 @@ class Reminders(commands.Cog):
                 continue
 
             if last_message_id is not None:
+                # Safety net: if pre-delete failed or the loop missed the earlier slot,
+                # delete any tracked previous message before sending today's message.
                 if await self._delete_tracked_message(channel, last_message_id):
                     self._clear_last_reminder_message(reminder_id)
 
