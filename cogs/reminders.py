@@ -1,4 +1,5 @@
 from datetime import datetime, timedelta
+import logging
 import sqlite3
 
 import discord
@@ -7,6 +8,8 @@ from discord import app_commands
 from discord.ext import commands, tasks
 
 from database import DB_FILE
+
+LOGGER = logging.getLogger(__name__)
 
 
 class ReminderModal(discord.ui.Modal, title='24h Reminder konfigurieren'):
@@ -363,7 +366,8 @@ class Reminders(commands.Cog):
                         (day_key, int(sent_message.id), int(row['id'])),
                     )
                     conn.commit()
-            except sqlite3.Error:
+            except sqlite3.Error as exc:
+                LOGGER.warning('Failed to update reminder send state for reminder id %s: %s', row['id'], exc)
                 continue
 
 
