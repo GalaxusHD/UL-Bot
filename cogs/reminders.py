@@ -1,7 +1,8 @@
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timedelta
 import sqlite3
 
 import discord
+import pytz
 from discord import app_commands
 from discord.ext import commands, tasks
 
@@ -286,7 +287,7 @@ class Reminders(commands.Cog):
 
     @tasks.loop(seconds=30)
     async def daily_reminder_scheduler(self) -> None:
-        now = datetime.now(tz=timezone.utc)
+        now = datetime.now(tz=pytz.timezone('Europe/Berlin'))
         check_window_start = now - timedelta(seconds=60)
         day_key = now.strftime('%Y-%m-%d')
         # The loop runs every 30s and checks the previous 60s window to tolerate delayed
