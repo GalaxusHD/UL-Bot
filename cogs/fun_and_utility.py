@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import asyncio
+import logging
 import random
 import sqlite3
 from datetime import datetime, timezone
@@ -70,12 +72,16 @@ ADMIN_COMMAND_EXPLANATIONS_DEFAULTS = [
 AUTOCOMPLETE_LIMIT = 25
 EMBED_DESCRIPTION_LIMIT = 4000
 
+LOGGER = logging.getLogger(__name__)
+
 
 class FunAndUtility(commands.Cog):
     def __init__(self, bot: commands.Bot) -> None:
         self.bot = bot
         self.voice_sessions: dict[tuple[int, int], datetime] = {}
-        self._seed_explanation_defaults()
+
+    async def cog_load(self) -> None:
+        await asyncio.to_thread(self._seed_explanation_defaults)
 
     @staticmethod
     def _utc_now() -> datetime:
@@ -164,8 +170,21 @@ class FunAndUtility(commands.Cog):
     def _seed_explanation_defaults(self) -> None:
         try:
             with sqlite3.connect(DB_FILE) as conn:
-                public_count = int(conn.execute('SELECT COUNT(*) FROM public_command_explanations').fetchone()[0])
-                admin_count = int(conn.execute('SELECT COUNT(*) FROM admin_command_explanations').fetchone()[0])
+                count_row = conn.execute(
+                    '''
+                    SELECT
+                        (SELECT COUNT(*) FROM public_command_explanations) AS public_count,
+                        (SELECT COUNT(*) FROM admin_command_explanations) AS admin_count
+                    '''
+                ).fetchone()
+                if count_row is None:
+                    LOGGER.warning(
+                        'Konnte Erklärungstabellen nicht auslesen. '
+                        'Der Bot läuft weiter ohne erneutes Default-Seeding.'
+                    )
+                    return
+                public_count = int(count_row[0])
+                admin_count = int(count_row[1])
                 if public_count == 0:
                     conn.executemany(
                         '''
@@ -183,7 +202,12 @@ class FunAndUtility(commands.Cog):
                         ADMIN_COMMAND_EXPLANATIONS_DEFAULTS,
                     )
                 conn.commit()
-        except sqlite3.Error:
+        except sqlite3.Error as exc:
+            LOGGER.warning(
+                'Konnte Standard-Erklärungen nicht initialisieren. '
+                'Der Bot läuft weiter, aber /erklärung-Listen können unvollständig sein: %s',
+                exc,
+            )
             return
 
     @staticmethod
@@ -191,7 +215,8 @@ class FunAndUtility(commands.Cog):
         if interaction.guild is None:
             await interaction.response.send_message('❌ Dieser Befehl ist nur auf Servern verfügbar.', ephemeral=True)
             return False
-        if not interaction.user.guild_permissions.administrator:
+        member = interaction.user if isinstance(interaction.user, discord.Member) else None
+        if member is None or not member.guild_permissions.administrator:
             await interaction.response.send_message('❌ Du brauchst Administrator-Rechte!', ephemeral=True)
             return False
         return True
@@ -201,19 +226,32 @@ class FunAndUtility(commands.Cog):
         table_name: str,
         current: str,
     ) -> list[app_commands.Choice[str]]:
+        query_by_table = {
+            'public_command_explanations': '''
+                SELECT command
+                FROM public_command_explanations
+                WHERE command LIKE ?
+                ORDER BY command ASC
+                LIMIT ?
+            ''',
+            'admin_command_explanations': '''
+                SELECT command
+                FROM admin_command_explanations
+                WHERE command LIKE ?
+                ORDER BY command ASC
+                LIMIT ?
+            ''',
+        }
+        query = query_by_table.get(table_name)
+        if query is None:
+            return []
         normalized = self._normalize_command_name(current) if current.strip() else ''
         like_pattern = f'{normalized}%' if normalized else '%'
         try:
             with sqlite3.connect(DB_FILE) as conn:
                 conn.row_factory = sqlite3.Row
                 rows = conn.execute(
-                    f'''
-                    SELECT command
-                    FROM {table_name}
-                    WHERE command LIKE ?
-                    ORDER BY command ASC
-                    LIMIT ?
-                    ''',
+                    query,
                     (like_pattern, AUTOCOMPLETE_LIMIT),
                 ).fetchall()
             return [app_commands.Choice(name=str(row['command']), value=str(row['command'])) for row in rows]
@@ -228,7 +266,7 @@ class FunAndUtility(commands.Cog):
         description = '\n'.join(lines)
         if len(description) <= EMBED_DESCRIPTION_LIMIT:
             return description
-        return f'{description[:EMBED_DESCRIPTION_LIMIT - 1]}…'
+        return f'{description[:EMBED_DESCRIPTION_LIMIT - 3]}...'
 
     async def _build_top_embed(self, interaction: discord.Interaction) -> discord.Embed:
         assert interaction.guild is not None
@@ -643,7 +681,7 @@ class FunAndUtility(commands.Cog):
     @erklaerung_command.autocomplete('befehl')
     async def erklaerung_autocomplete(
         self,
-        interaction: discord.Interaction,  # noqa: ARG002
+        _interaction: discord.Interaction,
         current: str,
     ) -> list[app_commands.Choice[str]]:
         return await self._command_autocomplete('public_command_explanations', current)
@@ -651,7 +689,7 @@ class FunAndUtility(commands.Cog):
     @erklaerung_edit_command.autocomplete('befehl')
     async def erklaerung_edit_autocomplete(
         self,
-        interaction: discord.Interaction,  # noqa: ARG002
+        _interaction: discord.Interaction,
         current: str,
     ) -> list[app_commands.Choice[str]]:
         return await self._command_autocomplete('public_command_explanations', current)
@@ -659,7 +697,7 @@ class FunAndUtility(commands.Cog):
     @erklaerung_remove_command.autocomplete('befehl')
     async def erklaerung_remove_autocomplete(
         self,
-        interaction: discord.Interaction,  # noqa: ARG002
+        _interaction: discord.Interaction,
         current: str,
     ) -> list[app_commands.Choice[str]]:
         return await self._command_autocomplete('public_command_explanations', current)
@@ -667,7 +705,7 @@ class FunAndUtility(commands.Cog):
     @erklaerung_admin_command.autocomplete('befehl')
     async def erklaerung_admin_autocomplete(
         self,
-        interaction: discord.Interaction,  # noqa: ARG002
+        _interaction: discord.Interaction,
         current: str,
     ) -> list[app_commands.Choice[str]]:
         return await self._command_autocomplete('admin_command_explanations', current)
@@ -675,7 +713,7 @@ class FunAndUtility(commands.Cog):
     @erklaerung_admin_edit_command.autocomplete('befehl')
     async def erklaerung_admin_edit_autocomplete(
         self,
-        interaction: discord.Interaction,  # noqa: ARG002
+        _interaction: discord.Interaction,
         current: str,
     ) -> list[app_commands.Choice[str]]:
         return await self._command_autocomplete('admin_command_explanations', current)
@@ -683,7 +721,7 @@ class FunAndUtility(commands.Cog):
     @erklaerung_admin_remove_command.autocomplete('befehl')
     async def erklaerung_admin_remove_autocomplete(
         self,
-        interaction: discord.Interaction,  # noqa: ARG002
+        _interaction: discord.Interaction,
         current: str,
     ) -> list[app_commands.Choice[str]]:
         return await self._command_autocomplete('admin_command_explanations', current)
