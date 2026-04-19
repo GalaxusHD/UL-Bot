@@ -409,7 +409,10 @@ class Reminders(commands.Cog):
                     self._clear_last_reminder_message(reminder_id)
 
             try:
-                sent_message = await channel.send(str(row['message']))
+                sent_message = await channel.send(
+                    str(row['message']),
+                    allowed_mentions=discord.AllowedMentions(roles=True),
+                )
             except (discord.Forbidden, discord.HTTPException):
                 continue
 
