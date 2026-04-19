@@ -96,8 +96,8 @@ class ReminderModal(discord.ui.Modal, title='24h Reminder konfigurieren'):
 
                 conn.execute(
                     '''
-                    INSERT INTO reminders (guild_id, channel_id, title, hour, minute, message, last_sent_date)
-                    VALUES (?, ?, ?, ?, ?, ?, NULL)
+                    INSERT INTO reminders (guild_id, channel_id, title, hour, minute, message, last_sent_date, last_message_id)
+                    VALUES (?, ?, ?, ?, ?, ?, NULL, NULL)
                     ''',
                     (interaction.guild.id, self.channel_id, self.reminder_title, hour, minute, message),
                 )
@@ -110,7 +110,7 @@ class ReminderModal(discord.ui.Modal, title='24h Reminder konfigurieren'):
 
             row = conn.execute(
                 '''
-                SELECT id, hour, minute, last_sent_date
+                SELECT id, hour, minute, last_sent_date, last_message_id
                 FROM reminders
                 WHERE guild_id = ? AND LOWER(title) = LOWER(?)
                 LIMIT 1
@@ -127,14 +127,15 @@ class ReminderModal(discord.ui.Modal, title='24h Reminder konfigurieren'):
             last_sent_date: str | None = None
             if int(row['hour']) == hour and int(row['minute']) == minute:
                 last_sent_date = None if row['last_sent_date'] is None else str(row['last_sent_date'])
+            last_message_id: int | None = None if row['last_message_id'] is None else int(row['last_message_id'])
 
             conn.execute(
                 '''
                 UPDATE reminders
-                SET hour = ?, minute = ?, message = ?, last_sent_date = ?
+                SET hour = ?, minute = ?, message = ?, last_sent_date = ?, last_message_id = ?
                 WHERE id = ?
                 ''',
-                (hour, minute, message, last_sent_date, int(row['id'])),
+                (hour, minute, message, last_sent_date, last_message_id, int(row['id'])),
             )
             conn.commit()
 
@@ -302,7 +303,7 @@ class Reminders(commands.Cog):
             if len(candidate_slots) == 1:
                 rows = conn.execute(
                     '''
-                    SELECT id, guild_id, channel_id, hour, minute, message, last_sent_date
+                    SELECT id, guild_id, channel_id, hour, minute, message, last_sent_date, last_message_id
                     FROM reminders
                     WHERE (hour * 60 + minute) = ?
                     ''',
@@ -311,7 +312,7 @@ class Reminders(commands.Cog):
             else:
                 rows = conn.execute(
                     '''
-                    SELECT id, guild_id, channel_id, hour, minute, message, last_sent_date
+                    SELECT id, guild_id, channel_id, hour, minute, message, last_sent_date, last_message_id
                     FROM reminders
                     WHERE (hour * 60 + minute) IN (?, ?)
                     ''',
@@ -342,15 +343,23 @@ class Reminders(commands.Cog):
             if not isinstance(channel, discord.TextChannel):
                 continue
 
+            previous_message_id = row['last_message_id']
+            if previous_message_id is not None:
+                try:
+                    previous_message = await channel.fetch_message(int(previous_message_id))
+                    await previous_message.delete()
+                except (discord.NotFound, discord.Forbidden, discord.HTTPException, ValueError):
+                    pass
+
             try:
-                await channel.send(str(row['message']))
+                sent_message = await channel.send(str(row['message']))
             except (discord.Forbidden, discord.HTTPException):
                 continue
 
             with sqlite3.connect(DB_FILE) as conn:
                 conn.execute(
-                    'UPDATE reminders SET last_sent_date = ? WHERE id = ?',
-                    (day_key, int(row['id'])),
+                    'UPDATE reminders SET last_sent_date = ?, last_message_id = ? WHERE id = ?',
+                    (day_key, int(sent_message.id), int(row['id'])),
                 )
                 conn.commit()
 
