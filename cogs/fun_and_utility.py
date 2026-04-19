@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import asyncio
+import logging
 import random
 import sqlite3
 from datetime import datetime, timezone
@@ -32,11 +34,54 @@ MAGIC_8_BALL_ANSWERS = [
     'Auf keinen Fall.',
 ]
 
+PUBLIC_COMMAND_EXPLANATIONS_DEFAULTS = [
+    ('/geburtstag', 'Trage einen Geburtstag ein'),
+    ('/würfel [seiten]', 'Würfle einen Würfel mit der angegebenen Anzahl von Seiten'),
+    ('/8ball', 'Stelle eine Frage und erhalte eine mystische deutsche Antwort'),
+    ('/top', 'Zeige die Top 10 der aktivsten Nutzer in Text- und Sprachchat an'),
+]
+
+ADMIN_COMMAND_EXPLANATIONS_DEFAULTS = [
+    ('/geburtstag_entfernen', 'Entferne einen Geburtstag aus der Liste'),
+    ('/geburtstagsliste', 'Zeige die Geburtstagsliste an und erstelle/aktualisiere sie im aktuellen Channel'),
+    ('/geburtstagsrolle', 'Setze die Rolle, die Geburtstagskinder erhalten'),
+    ('/geburtstag_check', 'Prüfe manuell, ob heute Geburtstage anstehen'),
+    ('/reminder', 'Erstelle einen Reminder, der täglich zur angegebenen Zeit gesendet wird'),
+    ('/reminder_edit', 'Bearbeite einen bestehenden Reminder'),
+    ('/reminder_remove', 'Lösche einen bestehenden Reminder'),
+    ('/role', 'Erstelle ein neues Rollenauswahlpanel'),
+    ('/role_edit', 'Bearbeite ein bestehendes Rollenauswahlpanel'),
+    ('/role_remove', 'Lösche ein bestehendes Rollenauswahlpanel'),
+    ('/welcome', 'Erstelle ein Welcome-Setup für neue Servermitglieder'),
+    ('/welcome_edit', 'Bearbeite ein bestehendes Welcome-Setup'),
+    ('/welcome_remove', 'Lösche ein Welcome-Setup'),
+    ('/moveall', 'Verschiebe alle User aus deinem aktuellen Voice-Channel in einen anderen'),
+    ('/reload', 'Lade Cogs neu, synchronisiere Befehle und starte Birthday-Tasks neu'),
+    ('/erklärung_edit', 'Bearbeite die Beschreibung eines öffentlichen Befehls'),
+    ('/erklärung_remove', 'Lösche einen öffentlichen Befehl aus der Liste'),
+    ('/erklärungadmin', 'Zeige die Erklärung für einen Admin-Befehl an'),
+    ('/erklärungadmin_liste', 'Zeige die komplette Liste aller Admin-Befehle an'),
+    ('/erklärungadmin_edit', 'Bearbeite die Beschreibung eines Admin-Befehls'),
+    ('/erklärungadmin_remove', 'Lösche einen Admin-Befehl aus der Liste'),
+    ('/log', 'Füge einen manuellen Eintrag zum Admin-Log hinzu'),
+    ('/log_liste', 'Zeige alle Log-Einträge an'),
+    ('/log_edit', 'Bearbeite einen Log-Eintrag'),
+    ('/log_remove', 'Lösche einen Log-Eintrag'),
+]
+
+AUTOCOMPLETE_LIMIT = 25
+EMBED_DESCRIPTION_LIMIT = 4000
+
+LOGGER = logging.getLogger(__name__)
+
 
 class FunAndUtility(commands.Cog):
     def __init__(self, bot: commands.Bot) -> None:
         self.bot = bot
         self.voice_sessions: dict[tuple[int, int], datetime] = {}
+
+    async def cog_load(self) -> None:
+        await asyncio.to_thread(self._seed_explanation_defaults)
 
     @staticmethod
     def _utc_now() -> datetime:
@@ -114,6 +159,114 @@ class FunAndUtility(commands.Cog):
         if rank is None:
             return f'Nicht gerankt — **{xp} XP**'
         return f'`#{rank}` — **{xp} XP**'
+
+    @staticmethod
+    def _normalize_command_name(command: str) -> str:
+        normalized = command.strip().lower()
+        if not normalized:
+            return ''
+        return normalized if normalized.startswith('/') else f'/{normalized}'
+
+    def _seed_explanation_defaults(self) -> None:
+        try:
+            with sqlite3.connect(DB_FILE) as conn:
+                count_row = conn.execute(
+                    '''
+                    SELECT
+                        (SELECT COUNT(*) FROM public_command_explanations) AS public_count,
+                        (SELECT COUNT(*) FROM admin_command_explanations) AS admin_count
+                    '''
+                ).fetchone()
+                if count_row is None:
+                    LOGGER.warning(
+                        'Konnte Erklärungstabellen nicht auslesen. '
+                        'Der Bot läuft weiter ohne erneutes Default-Seeding.'
+                    )
+                    return
+                public_count = int(count_row[0])
+                admin_count = int(count_row[1])
+                if public_count == 0:
+                    conn.executemany(
+                        '''
+                        INSERT INTO public_command_explanations (command, description)
+                        VALUES (?, ?)
+                        ''',
+                        PUBLIC_COMMAND_EXPLANATIONS_DEFAULTS,
+                    )
+                if admin_count == 0:
+                    conn.executemany(
+                        '''
+                        INSERT INTO admin_command_explanations (command, description)
+                        VALUES (?, ?)
+                        ''',
+                        ADMIN_COMMAND_EXPLANATIONS_DEFAULTS,
+                    )
+                conn.commit()
+        except sqlite3.Error as exc:
+            LOGGER.warning(
+                'Konnte Standard-Erklärungen nicht initialisieren. '
+                'Der Bot läuft weiter, aber /erklärung-Listen können unvollständig sein: %s',
+                exc,
+            )
+            return
+
+    @staticmethod
+    async def _require_admin(interaction: discord.Interaction) -> bool:
+        if interaction.guild is None:
+            await interaction.response.send_message('❌ Dieser Befehl ist nur auf Servern verfügbar.', ephemeral=True)
+            return False
+        member = interaction.user if isinstance(interaction.user, discord.Member) else None
+        if member is None or not member.guild_permissions.administrator:
+            await interaction.response.send_message('❌ Du brauchst Administrator-Rechte!', ephemeral=True)
+            return False
+        return True
+
+    async def _command_autocomplete(
+        self,
+        table_name: str,
+        current: str,
+    ) -> list[app_commands.Choice[str]]:
+        query_by_table = {
+            'public_command_explanations': '''
+                SELECT command
+                FROM public_command_explanations
+                WHERE command LIKE ?
+                ORDER BY command ASC
+                LIMIT ?
+            ''',
+            'admin_command_explanations': '''
+                SELECT command
+                FROM admin_command_explanations
+                WHERE command LIKE ?
+                ORDER BY command ASC
+                LIMIT ?
+            ''',
+        }
+        query = query_by_table.get(table_name)
+        if query is None:
+            return []
+        normalized = self._normalize_command_name(current) if current.strip() else ''
+        like_pattern = f'{normalized}%' if normalized else '%'
+        try:
+            with sqlite3.connect(DB_FILE) as conn:
+                conn.row_factory = sqlite3.Row
+                rows = conn.execute(
+                    query,
+                    (like_pattern, AUTOCOMPLETE_LIMIT),
+                ).fetchall()
+            return [app_commands.Choice(name=str(row['command']), value=str(row['command'])) for row in rows]
+        except sqlite3.Error:
+            return []
+
+    @staticmethod
+    def _build_explanation_description(rows: list[sqlite3.Row]) -> str:
+        if not rows:
+            return 'Keine Einträge vorhanden.'
+        lines = [f"**{str(row['command'])}** - {str(row['description'])}" for row in rows]
+        description = '\n'.join(lines)
+        if len(description) <= EMBED_DESCRIPTION_LIMIT:
+            return description
+        return f'{description[:EMBED_DESCRIPTION_LIMIT - 3]}...'
 
     async def _build_top_embed(self, interaction: discord.Interaction) -> discord.Embed:
         assert interaction.guild is not None
@@ -279,9 +432,299 @@ class FunAndUtility(commands.Cog):
         embed = await self._build_top_embed(interaction)
         await interaction.response.send_message(embed=embed)
 
-    @app_commands.command(name='top_liste', description='Zeigt die Top 10 Text- und Voice-XP')
-    async def top_list_command(self, interaction: discord.Interaction) -> None:
-        await self.top_command(interaction)
+    @app_commands.command(name='erklärung', description='Zeige die Erklärung für einen öffentlichen Befehl')
+    @app_commands.describe(befehl='Öffentlicher Befehl, z. B. /geburtstag')
+    async def erklaerung_command(self, interaction: discord.Interaction, befehl: str) -> None:
+        normalized_command = self._normalize_command_name(befehl)
+        if not normalized_command:
+            await interaction.response.send_message('❌ Bitte gib einen Befehl an.', ephemeral=True)
+            return
+        try:
+            with sqlite3.connect(DB_FILE) as conn:
+                conn.row_factory = sqlite3.Row
+                row = conn.execute(
+                    '''
+                    SELECT command, description
+                    FROM public_command_explanations
+                    WHERE command = ? OR command LIKE ?
+                    ORDER BY command ASC
+                    LIMIT 1
+                    ''',
+                    (normalized_command, f'{normalized_command} %'),
+                ).fetchone()
+            if row is None:
+                await interaction.response.send_message(
+                    '❌ Kein öffentlicher Befehl mit dieser Bezeichnung gefunden.',
+                    ephemeral=True,
+                )
+                return
+            embed = discord.Embed(
+                title=f"🟢 Erklärung für {str(row['command'])}",
+                description=str(row['description']),
+                color=discord.Colour.green(),
+            )
+            await interaction.response.send_message(embed=embed)
+        except sqlite3.Error:
+            await interaction.response.send_message('❌ Datenbankfehler beim Laden der Erklärung.', ephemeral=True)
+
+    @app_commands.command(name='erklärung_liste', description='Zeige alle öffentlichen Befehle mit Erklärung')
+    async def erklaerung_liste_command(self, interaction: discord.Interaction) -> None:
+        try:
+            with sqlite3.connect(DB_FILE) as conn:
+                conn.row_factory = sqlite3.Row
+                rows = conn.execute(
+                    '''
+                    SELECT command, description
+                    FROM public_command_explanations
+                    ORDER BY command ASC
+                    '''
+                ).fetchall()
+            embed = discord.Embed(
+                title='🟢 Öffentliche Befehle',
+                description=self._build_explanation_description(rows),
+                color=discord.Colour.green(),
+            )
+            await interaction.response.send_message(embed=embed)
+        except sqlite3.Error:
+            await interaction.response.send_message('❌ Datenbankfehler beim Laden der Liste.', ephemeral=True)
+
+    @app_commands.command(name='erklärung_edit', description='Bearbeite die Beschreibung eines öffentlichen Befehls')
+    @app_commands.default_permissions(administrator=True)
+    @app_commands.describe(befehl='Öffentlicher Befehl', beschreibung='Neue Beschreibung')
+    async def erklaerung_edit_command(self, interaction: discord.Interaction, befehl: str, beschreibung: str) -> None:
+        if not await self._require_admin(interaction):
+            return
+        normalized_command = self._normalize_command_name(befehl)
+        clean_description = beschreibung.strip()
+        if not normalized_command:
+            await interaction.response.send_message('❌ Bitte gib einen Befehl an.', ephemeral=True)
+            return
+        if not clean_description:
+            await interaction.response.send_message('❌ Beschreibung darf nicht leer sein.', ephemeral=True)
+            return
+
+        try:
+            with sqlite3.connect(DB_FILE) as conn:
+                cursor = conn.execute(
+                    '''
+                    UPDATE public_command_explanations
+                    SET description = ?
+                    WHERE command = ?
+                    ''',
+                    (clean_description, normalized_command),
+                )
+                conn.commit()
+            if cursor.rowcount <= 0:
+                await interaction.response.send_message('❌ Befehl nicht gefunden.', ephemeral=True)
+                return
+            await interaction.response.send_message(
+                f'✅ Beschreibung für {normalized_command} wurde aktualisiert.',
+                ephemeral=True,
+            )
+        except sqlite3.Error:
+            await interaction.response.send_message('❌ Datenbankfehler beim Bearbeiten.', ephemeral=True)
+
+    @app_commands.command(name='erklärung_remove', description='Lösche einen öffentlichen Befehl aus der Liste')
+    @app_commands.default_permissions(administrator=True)
+    @app_commands.describe(befehl='Öffentlicher Befehl')
+    async def erklaerung_remove_command(self, interaction: discord.Interaction, befehl: str) -> None:
+        if not await self._require_admin(interaction):
+            return
+        normalized_command = self._normalize_command_name(befehl)
+        if not normalized_command:
+            await interaction.response.send_message('❌ Bitte gib einen Befehl an.', ephemeral=True)
+            return
+        try:
+            with sqlite3.connect(DB_FILE) as conn:
+                cursor = conn.execute(
+                    'DELETE FROM public_command_explanations WHERE command = ?',
+                    (normalized_command,),
+                )
+                conn.commit()
+            if cursor.rowcount <= 0:
+                await interaction.response.send_message('❌ Befehl nicht gefunden.', ephemeral=True)
+                return
+            await interaction.response.send_message(
+                f'✅ {normalized_command} wurde aus der öffentlichen Liste entfernt.',
+                ephemeral=True,
+            )
+        except sqlite3.Error:
+            await interaction.response.send_message('❌ Datenbankfehler beim Entfernen.', ephemeral=True)
+
+    @app_commands.command(name='erklärungadmin', description='Zeige die Erklärung für einen Admin-Befehl')
+    @app_commands.default_permissions(administrator=True)
+    @app_commands.describe(befehl='Admin-Befehl, z. B. /reload')
+    async def erklaerung_admin_command(self, interaction: discord.Interaction, befehl: str) -> None:
+        if not await self._require_admin(interaction):
+            return
+        normalized_command = self._normalize_command_name(befehl)
+        if not normalized_command:
+            await interaction.response.send_message('❌ Bitte gib einen Befehl an.', ephemeral=True)
+            return
+        try:
+            with sqlite3.connect(DB_FILE) as conn:
+                conn.row_factory = sqlite3.Row
+                row = conn.execute(
+                    '''
+                    SELECT command, description
+                    FROM admin_command_explanations
+                    WHERE command = ? OR command LIKE ?
+                    ORDER BY command ASC
+                    LIMIT 1
+                    ''',
+                    (normalized_command, f'{normalized_command} %'),
+                ).fetchone()
+            if row is None:
+                await interaction.response.send_message('❌ Kein Admin-Befehl mit dieser Bezeichnung gefunden.', ephemeral=True)
+                return
+            embed = discord.Embed(
+                title=f"🔴 Erklärung für {str(row['command'])}",
+                description=str(row['description']),
+                color=discord.Colour.red(),
+            )
+            await interaction.response.send_message(embed=embed)
+        except sqlite3.Error:
+            await interaction.response.send_message('❌ Datenbankfehler beim Laden der Erklärung.', ephemeral=True)
+
+    @app_commands.command(name='erklärungadmin_liste', description='Zeige alle Admin-Befehle mit Erklärung')
+    @app_commands.default_permissions(administrator=True)
+    async def erklaerung_admin_liste_command(self, interaction: discord.Interaction) -> None:
+        if not await self._require_admin(interaction):
+            return
+        try:
+            with sqlite3.connect(DB_FILE) as conn:
+                conn.row_factory = sqlite3.Row
+                rows = conn.execute(
+                    '''
+                    SELECT command, description
+                    FROM admin_command_explanations
+                    ORDER BY command ASC
+                    '''
+                ).fetchall()
+            embed = discord.Embed(
+                title='🔴 Admin-Befehle',
+                description=self._build_explanation_description(rows),
+                color=discord.Colour.red(),
+            )
+            await interaction.response.send_message(embed=embed)
+        except sqlite3.Error:
+            await interaction.response.send_message('❌ Datenbankfehler beim Laden der Liste.', ephemeral=True)
+
+    @app_commands.command(name='erklärungadmin_edit', description='Bearbeite die Beschreibung eines Admin-Befehls')
+    @app_commands.default_permissions(administrator=True)
+    @app_commands.describe(befehl='Admin-Befehl', beschreibung='Neue Beschreibung')
+    async def erklaerung_admin_edit_command(
+        self,
+        interaction: discord.Interaction,
+        befehl: str,
+        beschreibung: str,
+    ) -> None:
+        if not await self._require_admin(interaction):
+            return
+        normalized_command = self._normalize_command_name(befehl)
+        clean_description = beschreibung.strip()
+        if not normalized_command:
+            await interaction.response.send_message('❌ Bitte gib einen Befehl an.', ephemeral=True)
+            return
+        if not clean_description:
+            await interaction.response.send_message('❌ Beschreibung darf nicht leer sein.', ephemeral=True)
+            return
+
+        try:
+            with sqlite3.connect(DB_FILE) as conn:
+                cursor = conn.execute(
+                    '''
+                    UPDATE admin_command_explanations
+                    SET description = ?
+                    WHERE command = ?
+                    ''',
+                    (clean_description, normalized_command),
+                )
+                conn.commit()
+            if cursor.rowcount <= 0:
+                await interaction.response.send_message('❌ Befehl nicht gefunden.', ephemeral=True)
+                return
+            await interaction.response.send_message(
+                f'✅ Beschreibung für {normalized_command} wurde aktualisiert.',
+                ephemeral=True,
+            )
+        except sqlite3.Error:
+            await interaction.response.send_message('❌ Datenbankfehler beim Bearbeiten.', ephemeral=True)
+
+    @app_commands.command(name='erklärungadmin_remove', description='Lösche einen Admin-Befehl aus der Liste')
+    @app_commands.default_permissions(administrator=True)
+    @app_commands.describe(befehl='Admin-Befehl')
+    async def erklaerung_admin_remove_command(self, interaction: discord.Interaction, befehl: str) -> None:
+        if not await self._require_admin(interaction):
+            return
+        normalized_command = self._normalize_command_name(befehl)
+        if not normalized_command:
+            await interaction.response.send_message('❌ Bitte gib einen Befehl an.', ephemeral=True)
+            return
+        try:
+            with sqlite3.connect(DB_FILE) as conn:
+                cursor = conn.execute(
+                    'DELETE FROM admin_command_explanations WHERE command = ?',
+                    (normalized_command,),
+                )
+                conn.commit()
+            if cursor.rowcount <= 0:
+                await interaction.response.send_message('❌ Befehl nicht gefunden.', ephemeral=True)
+                return
+            await interaction.response.send_message(
+                f'✅ {normalized_command} wurde aus der Admin-Liste entfernt.',
+                ephemeral=True,
+            )
+        except sqlite3.Error:
+            await interaction.response.send_message('❌ Datenbankfehler beim Entfernen.', ephemeral=True)
+
+    @erklaerung_command.autocomplete('befehl')
+    async def erklaerung_autocomplete(
+        self,
+        _interaction: discord.Interaction,
+        current: str,
+    ) -> list[app_commands.Choice[str]]:
+        return await self._command_autocomplete('public_command_explanations', current)
+
+    @erklaerung_edit_command.autocomplete('befehl')
+    async def erklaerung_edit_autocomplete(
+        self,
+        _interaction: discord.Interaction,
+        current: str,
+    ) -> list[app_commands.Choice[str]]:
+        return await self._command_autocomplete('public_command_explanations', current)
+
+    @erklaerung_remove_command.autocomplete('befehl')
+    async def erklaerung_remove_autocomplete(
+        self,
+        _interaction: discord.Interaction,
+        current: str,
+    ) -> list[app_commands.Choice[str]]:
+        return await self._command_autocomplete('public_command_explanations', current)
+
+    @erklaerung_admin_command.autocomplete('befehl')
+    async def erklaerung_admin_autocomplete(
+        self,
+        _interaction: discord.Interaction,
+        current: str,
+    ) -> list[app_commands.Choice[str]]:
+        return await self._command_autocomplete('admin_command_explanations', current)
+
+    @erklaerung_admin_edit_command.autocomplete('befehl')
+    async def erklaerung_admin_edit_autocomplete(
+        self,
+        _interaction: discord.Interaction,
+        current: str,
+    ) -> list[app_commands.Choice[str]]:
+        return await self._command_autocomplete('admin_command_explanations', current)
+
+    @erklaerung_admin_remove_command.autocomplete('befehl')
+    async def erklaerung_admin_remove_autocomplete(
+        self,
+        _interaction: discord.Interaction,
+        current: str,
+    ) -> list[app_commands.Choice[str]]:
+        return await self._command_autocomplete('admin_command_explanations', current)
 
     @app_commands.command(name='log_liste', description='Zeige die Admin-Log-Liste in diesem Channel')
     @app_commands.default_permissions(administrator=True)
