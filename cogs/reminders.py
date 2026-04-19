@@ -127,7 +127,7 @@ class ReminderModal(discord.ui.Modal, title='24h Reminder konfigurieren'):
             last_sent_date: str | None = None
             if int(row['hour']) == hour and int(row['minute']) == minute:
                 last_sent_date = None if row['last_sent_date'] is None else str(row['last_sent_date'])
-            last_message_id: int | None = None if row['last_message_id'] is None else int(row['last_message_id'])
+            last_message_id: int | None = int(row['last_message_id']) if row['last_message_id'] is not None else None
 
             conn.execute(
                 '''
@@ -356,12 +356,15 @@ class Reminders(commands.Cog):
             except (discord.Forbidden, discord.HTTPException):
                 continue
 
-            with sqlite3.connect(DB_FILE) as conn:
-                conn.execute(
-                    'UPDATE reminders SET last_sent_date = ?, last_message_id = ? WHERE id = ?',
-                    (day_key, int(sent_message.id), int(row['id'])),
-                )
-                conn.commit()
+            try:
+                with sqlite3.connect(DB_FILE) as conn:
+                    conn.execute(
+                        'UPDATE reminders SET last_sent_date = ?, last_message_id = ? WHERE id = ?',
+                        (day_key, int(sent_message.id), int(row['id'])),
+                    )
+                    conn.commit()
+            except sqlite3.Error:
+                continue
 
 
 async def setup(bot: commands.Bot) -> None:
