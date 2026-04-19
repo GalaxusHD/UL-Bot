@@ -48,6 +48,10 @@ ALTER_COLUMN_SQL = {
         "ALTER TABLE role_messages ADD COLUMN description TEXT NOT NULL DEFAULT ''",
     ('role_messages', 'color', "TEXT NOT NULL DEFAULT 'blurple'"):
         "ALTER TABLE role_messages ADD COLUMN color TEXT NOT NULL DEFAULT 'blurple'",
+    ('reminders', 'last_message_id', 'INTEGER'):
+        'ALTER TABLE reminders ADD COLUMN last_message_id INTEGER',
+    ('reminders', 'last_pin_date', 'TEXT'):
+        'ALTER TABLE reminders ADD COLUMN last_pin_date TEXT',
 }
 
 
@@ -186,10 +190,14 @@ def init_database() -> None:
             minute INTEGER NOT NULL,
             message TEXT NOT NULL,
             last_sent_date TEXT,
+            last_message_id INTEGER,
+            last_pin_date TEXT,
             created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
         )
         '''
     )
+    _ensure_column(cursor, 'reminders', 'last_message_id', 'INTEGER')
+    _ensure_column(cursor, 'reminders', 'last_pin_date', 'TEXT')
 
     cursor.execute(
         '''

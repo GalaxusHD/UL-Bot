@@ -157,6 +157,24 @@ class Reminders(commands.Cog):
         if not self.daily_reminder_scheduler.is_running():
             self.daily_reminder_scheduler.start()
 
+    def _clear_last_reminder_message(self, reminder_id: int) -> None:
+        with sqlite3.connect(DB_FILE) as conn:
+            conn.execute(
+                'UPDATE reminders SET last_message_id = NULL, last_pin_date = NULL WHERE id = ?',
+                (reminder_id,),
+            )
+            conn.commit()
+
+    async def _delete_tracked_message(self, channel: discord.TextChannel, message_id: int) -> bool:
+        try:
+            message = await channel.fetch_message(message_id)
+            await message.delete()
+            return True
+        except discord.NotFound:
+            return True
+        except (discord.Forbidden, discord.HTTPException):
+            return False
+
     async def _title_autocomplete(
         self,
         interaction: discord.Interaction,
@@ -302,20 +320,22 @@ class Reminders(commands.Cog):
             if len(candidate_slots) == 1:
                 rows = conn.execute(
                     '''
-                    SELECT id, guild_id, channel_id, hour, minute, message, last_sent_date
+                    SELECT id, guild_id, channel_id, hour, minute, message, last_sent_date, last_message_id, last_pin_date
                     FROM reminders
                     WHERE (hour * 60 + minute) = ?
+                       OR ((hour * 60 + minute + 1439) % 1440) = ?
                     ''',
-                    (candidate_slots[0],),
+                    (candidate_slots[0], candidate_slots[0]),
                 ).fetchall()
             else:
                 rows = conn.execute(
                     '''
-                    SELECT id, guild_id, channel_id, hour, minute, message, last_sent_date
+                    SELECT id, guild_id, channel_id, hour, minute, message, last_sent_date, last_message_id, last_pin_date
                     FROM reminders
                     WHERE (hour * 60 + minute) IN (?, ?)
+                       OR ((hour * 60 + minute + 1439) % 1440) IN (?, ?)
                     ''',
-                    (candidate_slots[0], candidate_slots[1]),
+                    (candidate_slots[0], candidate_slots[1], candidate_slots[0], candidate_slots[1]),
                 ).fetchall()
 
         for row in rows:
@@ -330,10 +350,24 @@ class Reminders(commands.Cog):
             # (e.g. window crosses midnight and includes 23:59 while now is 00:00).
             if due_at > now:
                 due_at -= timedelta(days=1)
-            if due_at < check_window_start or due_at > now:
-                continue
-            if row['last_sent_date'] == day_key:
-                continue
+            pre_delete_at = due_at - timedelta(minutes=1)
+
+            reminder_id = int(row['id'])
+            last_message_id = None if row['last_message_id'] is None else int(row['last_message_id'])
+            last_pin_date = None if row['last_pin_date'] is None else str(row['last_pin_date'])
+
+            if (
+                last_message_id is not None
+                and last_pin_date != day_key
+                and check_window_start <= pre_delete_at <= now
+            ):
+                guild = self.bot.get_guild(int(row['guild_id']))
+                if guild is not None:
+                    channel = guild.get_channel(int(row['channel_id']))
+                    if isinstance(channel, discord.TextChannel):
+                        if await self._delete_tracked_message(channel, last_message_id):
+                            self._clear_last_reminder_message(reminder_id)
+                            last_message_id = None
 
             guild = self.bot.get_guild(int(row['guild_id']))
             if guild is None:
@@ -342,15 +376,33 @@ class Reminders(commands.Cog):
             if not isinstance(channel, discord.TextChannel):
                 continue
 
+            if due_at < check_window_start or due_at > now:
+                continue
+            if row['last_sent_date'] == day_key:
+                continue
+
+            if last_message_id is not None:
+                if await self._delete_tracked_message(channel, last_message_id):
+                    self._clear_last_reminder_message(reminder_id)
+
             try:
-                await channel.send(str(row['message']))
+                sent_message = await channel.send(str(row['message']))
             except (discord.Forbidden, discord.HTTPException):
                 continue
 
+            try:
+                await sent_message.pin()
+            except (discord.Forbidden, discord.HTTPException):
+                pass
+
             with sqlite3.connect(DB_FILE) as conn:
                 conn.execute(
-                    'UPDATE reminders SET last_sent_date = ? WHERE id = ?',
-                    (day_key, int(row['id'])),
+                    '''
+                    UPDATE reminders
+                    SET last_sent_date = ?, last_message_id = ?, last_pin_date = ?
+                    WHERE id = ?
+                    ''',
+                    (day_key, sent_message.id, day_key, reminder_id),
                 )
                 conn.commit()
 
