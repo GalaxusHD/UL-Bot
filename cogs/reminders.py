@@ -1,3 +1,4 @@
+import asyncio
 from datetime import datetime, timedelta
 import logging
 import sqlite3
@@ -10,6 +11,7 @@ from discord.ext import commands, tasks
 from database import DB_FILE
 
 LOGGER = logging.getLogger(__name__)
+MAX_STATE_UPDATE_RETRIES = 2
 
 
 class ReminderModal(discord.ui.Modal, title='24h Reminder konfigurieren'):
@@ -361,7 +363,7 @@ class Reminders(commands.Cog):
 
             state_updated = False
             last_error: sqlite3.Error | None = None
-            for _ in range(2):
+            for attempt in range(MAX_STATE_UPDATE_RETRIES):
                 try:
                     with sqlite3.connect(DB_FILE) as conn:
                         conn.execute(
@@ -373,6 +375,8 @@ class Reminders(commands.Cog):
                     break
                 except sqlite3.Error as exc:
                     last_error = exc
+                    if attempt + 1 < MAX_STATE_UPDATE_RETRIES:
+                        await asyncio.sleep(0.1)
 
             if not state_updated:
                 LOGGER.warning('Failed to update reminder send state for reminder id %s: %s', row['id'], last_error)
