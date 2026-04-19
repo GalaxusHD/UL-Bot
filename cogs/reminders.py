@@ -413,11 +413,6 @@ class Reminders(commands.Cog):
             except (discord.Forbidden, discord.HTTPException):
                 continue
 
-            try:
-                await sent_message.pin()
-            except (discord.Forbidden, discord.HTTPException):
-                pass
-
             with sqlite3.connect(DB_FILE) as conn:
                 conn.execute(
                     '''
