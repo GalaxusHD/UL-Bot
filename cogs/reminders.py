@@ -359,15 +359,27 @@ class Reminders(commands.Cog):
             except (discord.Forbidden, discord.HTTPException):
                 continue
 
-            try:
-                with sqlite3.connect(DB_FILE) as conn:
-                    conn.execute(
-                        'UPDATE reminders SET last_sent_date = ?, last_message_id = ? WHERE id = ?',
-                        (day_key, int(sent_message.id), int(row['id'])),
-                    )
-                    conn.commit()
-            except sqlite3.Error as exc:
-                LOGGER.warning('Failed to update reminder send state for reminder id %s: %s', row['id'], exc)
+            state_updated = False
+            last_error: sqlite3.Error | None = None
+            for _ in range(2):
+                try:
+                    with sqlite3.connect(DB_FILE) as conn:
+                        conn.execute(
+                            'UPDATE reminders SET last_sent_date = ?, last_message_id = ? WHERE id = ?',
+                            (day_key, int(sent_message.id), int(row['id'])),
+                        )
+                        conn.commit()
+                    state_updated = True
+                    break
+                except sqlite3.Error as exc:
+                    last_error = exc
+
+            if not state_updated:
+                LOGGER.warning('Failed to update reminder send state for reminder id %s: %s', row['id'], last_error)
+                try:
+                    await sent_message.delete()
+                except (discord.NotFound, discord.Forbidden, discord.HTTPException):
+                    pass
                 continue
 
 
