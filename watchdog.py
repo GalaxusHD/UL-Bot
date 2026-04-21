@@ -16,6 +16,7 @@ HEARTBEAT_FILE = ROOT_DIR / '.bot_heartbeat'
 WATCHDOG_LOG = ROOT_DIR / 'watchdog.log'
 CHECK_INTERVAL_SECONDS = 60
 STALE_SECONDS = 30
+MAX_RETRY_DELAY_SECONDS = 30
 
 
 def configure_logging() -> None:
@@ -114,7 +115,7 @@ def restart_bot(dead_pid: int | None, reason: str) -> int | None:
     for attempt in range(1, 4):
         new_pid = start_bot_process()
         if new_pid is None:
-            sleep_seconds = min(5 * attempt, 30)
+            sleep_seconds = min(5 * attempt, MAX_RETRY_DELAY_SECONDS)
             logging.warning('Restart attempt %s failed. Retrying in %ss.', attempt, sleep_seconds)
             time.sleep(sleep_seconds)
             continue
