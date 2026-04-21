@@ -34,10 +34,15 @@ def terminate_process(process: subprocess.Popen[bytes] | None, force_after: int 
 
     if process.poll() is None:
         if os.name == 'nt':
-            subprocess.run(['taskkill', '/PID', str(process.pid)], check=False, capture_output=True, text=True)
+            subprocess.run(['taskkill', '/T', '/PID', str(process.pid)], check=False, capture_output=True, text=True)
             time.sleep(0.25)
             if process.poll() is None:
-                subprocess.run(['taskkill', '/F', '/PID', str(process.pid)], check=False, capture_output=True, text=True)
+                subprocess.run(
+                    ['taskkill', '/F', '/T', '/PID', str(process.pid)],
+                    check=False,
+                    capture_output=True,
+                    text=True,
+                )
         else:
             process.kill()
 
@@ -51,11 +56,11 @@ def terminate_pid(pid: int | None, force_after: int = 10) -> None:
         return
 
     if os.name == 'nt':
-        subprocess.run(['taskkill', '/PID', str(pid)], check=False, capture_output=True, text=True)
+        subprocess.run(['taskkill', '/T', '/PID', str(pid)], check=False, capture_output=True, text=True)
         time.sleep(0.25)
         try:
             os.kill(pid, 0)
-            subprocess.run(['taskkill', '/F', '/PID', str(pid)], check=False, capture_output=True, text=True)
+            subprocess.run(['taskkill', '/F', '/T', '/PID', str(pid)], check=False, capture_output=True, text=True)
         except (ProcessLookupError, PermissionError):
             pass
         return
