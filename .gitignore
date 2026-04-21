@@ -1,3 +1,6 @@
 __pycache__/
 *.pyc
 ul_bot.db
+.bot_heartbeat
+.bot_watchdog.pid
+watchdog.log
