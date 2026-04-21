@@ -137,7 +137,7 @@ def main() -> None:
         if pid is None or timestamp is None:
             should_restart = True
             reason = 'missing/invalid heartbeat data'
-        elif now - timestamp > STALE_SECONDS:
+        elif now - timestamp >= STALE_SECONDS:
             should_restart = True
             reason = f'stale heartbeat ({now - timestamp:.1f}s old, pid={pid})'
         elif not is_process_running(pid):

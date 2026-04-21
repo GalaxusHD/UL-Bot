@@ -33,7 +33,10 @@ def terminate_process(process: subprocess.Popen[bytes] | None, force_after: int 
         time.sleep(0.25)
 
     if process.poll() is None:
-        process.kill()
+        if os.name == 'nt':
+            subprocess.run(['taskkill', '/F', '/PID', str(process.pid)], check=False, capture_output=True, text=True)
+        else:
+            process.kill()
 
 
 def terminate_pid(pid: int | None, force_after: int = 10) -> None:
@@ -42,6 +45,10 @@ def terminate_pid(pid: int | None, force_after: int = 10) -> None:
     try:
         os.kill(pid, 0)
     except (ProcessLookupError, PermissionError):
+        return
+
+    if os.name == 'nt':
+        subprocess.run(['taskkill', '/F', '/PID', str(pid)], check=False, capture_output=True, text=True)
         return
 
     try:
@@ -81,7 +88,9 @@ def main() -> None:
     global shutdown_requested
 
     signal.signal(signal.SIGINT, handle_signal)
-    signal.signal(signal.SIGTERM, handle_signal)
+    sigterm = getattr(signal, 'SIGTERM', None)
+    if sigterm is not None:
+        signal.signal(sigterm, handle_signal)
 
     bot_command = [sys.executable, 'main.py']
     bot_process = subprocess.Popen(bot_command, cwd=ROOT_DIR)
