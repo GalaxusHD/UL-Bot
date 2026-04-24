@@ -12,6 +12,39 @@ MINUTES_PER_DAY = 24 * 60
 PRE_DELETE_MINUTES = 1
 
 
+def _parse_date_input(value: str) -> str | None:
+    """Parse a D.M.Y date string into ISO YYYY-MM-DD format.
+
+    Returns None if *value* is blank. Raises ValueError for invalid input.
+    """
+    value = value.strip()
+    if not value:
+        return None
+    parts = value.split('.')
+    if len(parts) != 3:
+        raise ValueError(f'Ungültiges Datumsformat: {value!r}')
+    try:
+        day, month, year = int(parts[0]), int(parts[1]), int(parts[2])
+    except ValueError:
+        raise ValueError(f'Ungültiges Datumsformat: {value!r}')
+    if year < 100:
+        year += 2000
+    # Let datetime validate the calendar date (raises ValueError for e.g. 31.2.26)
+    d = datetime(year, month, day)
+    return d.strftime('%Y-%m-%d')
+
+
+def _format_date_display(iso_date: str | None) -> str:
+    """Convert an ISO YYYY-MM-DD string back to D.M.YY for display in the modal."""
+    if not iso_date:
+        return ''
+    try:
+        d = datetime.strptime(iso_date, '%Y-%m-%d')
+        return f'{d.day}.{d.month}.{d.year % 100:02d}'
+    except ValueError:
+        return ''
+
+
 class ReminderModal(discord.ui.Modal, title='24h Reminder konfigurieren'):
     def __init__(
         self,
@@ -22,6 +55,8 @@ class ReminderModal(discord.ui.Modal, title='24h Reminder konfigurieren'):
         initial_hour: int | None = None,
         initial_minute: int | None = None,
         initial_message: str | None = None,
+        initial_start_date: str | None = None,
+        initial_end_date: str | None = None,
     ) -> None:
         super().__init__()
         self.cog = cog
@@ -47,9 +82,25 @@ class ReminderModal(discord.ui.Modal, title='24h Reminder konfigurieren'):
             default=initial_message or '',
             max_length=2000,
         )
+        self.start_date_input = discord.ui.TextInput(
+            label='Startdatum (optional, D.M.JJ z.B. 3.5.26)',
+            placeholder='3.5.26',
+            default=initial_start_date or '',
+            required=False,
+            max_length=10,
+        )
+        self.end_date_input = discord.ui.TextInput(
+            label='Enddatum (optional, D.M.JJ z.B. 5.5.26)',
+            placeholder='5.5.26',
+            default=initial_end_date or '',
+            required=False,
+            max_length=10,
+        )
         self.add_item(self.hour_input)
         self.add_item(self.minute_input)
         self.add_item(self.message_input)
+        self.add_item(self.start_date_input)
+        self.add_item(self.end_date_input)
 
     async def on_submit(self, interaction: discord.Interaction) -> None:
         if interaction.guild is None:
@@ -78,6 +129,32 @@ class ReminderModal(discord.ui.Modal, title='24h Reminder konfigurieren'):
             await interaction.response.send_message('❌ Nachricht darf nicht leer sein.', ephemeral=True)
             return
 
+        try:
+            start_date = _parse_date_input(str(self.start_date_input.value))
+            end_date = _parse_date_input(str(self.end_date_input.value))
+        except ValueError:
+            await interaction.response.send_message(
+                '❌ Ungültiges Datumsformat. Bitte D.M.JJ verwenden (z.B. 3.5.26).',
+                ephemeral=True,
+            )
+            return
+
+        if start_date is not None and end_date is not None and end_date < start_date:
+            await interaction.response.send_message(
+                '❌ Enddatum darf nicht vor dem Startdatum liegen.',
+                ephemeral=True,
+            )
+            return
+
+        date_info = ''
+        if start_date or end_date:
+            parts: list[str] = []
+            if start_date:
+                parts.append(f'von {_format_date_display(start_date)}')
+            if end_date:
+                parts.append(f'bis {_format_date_display(end_date)}')
+            date_info = ' (' + ', '.join(parts) + ')'
+
         with sqlite3.connect(DB_FILE) as conn:
             conn.row_factory = sqlite3.Row
             if self.action == 'create':
@@ -99,14 +176,14 @@ class ReminderModal(discord.ui.Modal, title='24h Reminder konfigurieren'):
 
                 conn.execute(
                     '''
-                    INSERT INTO reminders (guild_id, channel_id, title, hour, minute, message, last_sent_date)
-                    VALUES (?, ?, ?, ?, ?, ?, NULL)
+                    INSERT INTO reminders (guild_id, channel_id, title, hour, minute, message, last_sent_date, start_date, end_date)
+                    VALUES (?, ?, ?, ?, ?, ?, NULL, ?, ?)
                     ''',
-                    (interaction.guild.id, self.channel_id, self.reminder_title, hour, minute, message),
+                    (interaction.guild.id, self.channel_id, self.reminder_title, hour, minute, message, start_date, end_date),
                 )
                 conn.commit()
                 await interaction.response.send_message(
-                    f'✅ Reminder "{self.reminder_title}" gespeichert für täglich {hour:02d}:{minute:02d}.',
+                    f'✅ Reminder "{self.reminder_title}" gespeichert für täglich {hour:02d}:{minute:02d}{date_info}.',
                     ephemeral=True,
                 )
                 return
@@ -134,15 +211,15 @@ class ReminderModal(discord.ui.Modal, title='24h Reminder konfigurieren'):
             conn.execute(
                 '''
                 UPDATE reminders
-                SET hour = ?, minute = ?, message = ?, last_sent_date = ?
+                SET hour = ?, minute = ?, message = ?, last_sent_date = ?, start_date = ?, end_date = ?
                 WHERE id = ?
                 ''',
-                (hour, minute, message, last_sent_date, int(row['id'])),
+                (hour, minute, message, last_sent_date, start_date, end_date, int(row['id'])),
             )
             conn.commit()
 
         await interaction.response.send_message(
-            f'✅ Reminder "{self.reminder_title}" wurde aktualisiert ({hour:02d}:{minute:02d}).',
+            f'✅ Reminder "{self.reminder_title}" wurde aktualisiert ({hour:02d}:{minute:02d}{date_info}).',
             ephemeral=True,
         )
 
@@ -254,7 +331,7 @@ class Reminders(commands.Cog):
             conn.row_factory = sqlite3.Row
             row = conn.execute(
                 '''
-                SELECT channel_id, hour, minute, message
+                SELECT channel_id, hour, minute, message, start_date, end_date
                 FROM reminders
                 WHERE guild_id = ? AND LOWER(title) = LOWER(?)
                 LIMIT 1
@@ -275,6 +352,8 @@ class Reminders(commands.Cog):
                 initial_hour=int(row['hour']),
                 initial_minute=int(row['minute']),
                 initial_message=str(row['message']),
+                initial_start_date=_format_date_display(row['start_date']),
+                initial_end_date=_format_date_display(row['end_date']),
             )
         )
 
@@ -332,7 +411,7 @@ class Reminders(commands.Cog):
             if len(candidate_slots) == 1:
                 rows = conn.execute(
                     '''
-                    SELECT id, guild_id, channel_id, hour, minute, message, last_sent_date, last_message_id, last_pin_date
+                    SELECT id, guild_id, channel_id, hour, minute, message, last_sent_date, last_message_id, last_pin_date, start_date, end_date
                     FROM reminders
                     WHERE (hour * 60 + minute) = ?
                        -- Also include reminders where "due time - 1 minute" matches this slot,
@@ -350,7 +429,7 @@ class Reminders(commands.Cog):
             else:
                 rows = conn.execute(
                     '''
-                    SELECT id, guild_id, channel_id, hour, minute, message, last_sent_date, last_message_id, last_pin_date
+                    SELECT id, guild_id, channel_id, hour, minute, message, last_sent_date, last_message_id, last_pin_date, start_date, end_date
                     FROM reminders
                     WHERE (hour * 60 + minute) IN (?, ?)
                        OR ((hour * 60 + minute - ? + ?) % ?) IN (?, ?)
@@ -400,6 +479,14 @@ class Reminders(commands.Cog):
             if due_at < check_window_start or due_at > now:
                 continue
             if row['last_sent_date'] == day_key:
+                continue
+
+            # Check optional date range (stored as ISO YYYY-MM-DD strings)
+            reminder_start = row['start_date']
+            reminder_end = row['end_date']
+            if reminder_start and day_key < str(reminder_start):
+                continue
+            if reminder_end and day_key > str(reminder_end):
                 continue
 
             if last_message_id is not None:
