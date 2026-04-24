@@ -198,6 +198,8 @@ def init_database() -> None:
     )
     _ensure_column(cursor, 'reminders', 'last_message_id', 'INTEGER')
     _ensure_column(cursor, 'reminders', 'last_pin_date', 'TEXT')
+    _ensure_column(cursor, 'reminders', 'start_date', 'TEXT')
+    _ensure_column(cursor, 'reminders', 'end_date', 'TEXT')
 
     cursor.execute(
         '''
