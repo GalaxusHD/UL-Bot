@@ -21,11 +21,42 @@ TABLE_INFO_SQL = {
     'public_command_explanations': 'PRAGMA table_info(public_command_explanations)',
     'admin_command_explanations': 'PRAGMA table_info(admin_command_explanations)',
 }
-ALTER_COLUMN_SQL =
+ALTER_COLUMN_SQL = {
+    ('birthdays', 'username', "TEXT NOT NULL DEFAULT '@unknown'"):
+        "ALTER TABLE birthdays ADD COLUMN username TEXT NOT NULL DEFAULT '@unknown'",
+    ('birthdays', 'real_name', 'TEXT'):
+        'ALTER TABLE birthdays ADD COLUMN real_name TEXT',
+    ('birthdays', 'year', 'INTEGER'):
+        'ALTER TABLE birthdays ADD COLUMN year INTEGER',
+    ('birthdays', 'month', 'INTEGER NOT NULL DEFAULT 1'):
+        'ALTER TABLE birthdays ADD COLUMN month INTEGER NOT NULL DEFAULT 1',
+    ('birthdays', 'day', 'INTEGER NOT NULL DEFAULT 1'):
+        'ALTER TABLE birthdays ADD COLUMN day INTEGER NOT NULL DEFAULT 1',
+    ('birthday_settings', 'current_message_channel_id', 'INTEGER'):
+        'ALTER TABLE birthday_settings ADD COLUMN current_message_channel_id INTEGER',
+    ('text_messages', 'message_content', 'TEXT'):
+        'ALTER TABLE text_messages ADD COLUMN message_content TEXT',
+    ('text_messages', 'message_content', "TEXT NOT NULL DEFAULT ''"):
+        "ALTER TABLE text_messages ADD COLUMN message_content TEXT NOT NULL DEFAULT ''",
+    ('text_messages', 'channel_id', 'INTEGER'):
+        'ALTER TABLE text_messages ADD COLUMN channel_id INTEGER',
+    ('text_messages', 'message_id', 'INTEGER'):
+        'ALTER TABLE text_messages ADD COLUMN message_id INTEGER',
+    ('role_message_roles', 'color', "TEXT NOT NULL DEFAULT 'blurple'"):
+        "ALTER TABLE role_message_roles ADD COLUMN color TEXT NOT NULL DEFAULT 'blurple'",
+    ('role_messages', 'description', "TEXT NOT NULL DEFAULT ''"):
+        "ALTER TABLE role_messages ADD COLUMN description TEXT NOT NULL DEFAULT ''",
+    ('role_messages', 'color', "TEXT NOT NULL DEFAULT 'blurple'"):
+        "ALTER TABLE role_messages ADD COLUMN color TEXT NOT NULL DEFAULT 'blurple'",
+    ('reminders', 'last_message_id', 'INTEGER'):
+        'ALTER TABLE reminders ADD COLUMN last_message_id INTEGER',
+    ('reminders', 'last_pin_date', 'TEXT'):
+        'ALTER TABLE reminders ADD COLUMN last_pin_date TEXT',
     ('reminders', 'start_date', 'TEXT'):
         'ALTER TABLE reminders ADD COLUMN start_date TEXT',
     ('reminders', 'end_date', 'TEXT'):
         'ALTER TABLE reminders ADD COLUMN end_date TEXT',
+}
 
 
 def _column_exists(cursor: sqlite3.Cursor, table: str, column: str) -> bool:
