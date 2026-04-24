@@ -21,7 +21,7 @@ TABLE_INFO_SQL = {
     'public_command_explanations': 'PRAGMA table_info(public_command_explanations)',
     'admin_command_explanations': 'PRAGMA table_info(admin_command_explanations)',
 }
-ALTER_COLUMN_SQL = 
+ALTER_COLUMN_SQL =
     ('reminders', 'start_date', 'TEXT'):
         'ALTER TABLE reminders ADD COLUMN start_date TEXT',
     ('reminders', 'end_date', 'TEXT'):
