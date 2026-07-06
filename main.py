@@ -7,6 +7,7 @@ from discord.ext import commands
 from dotenv import load_dotenv
 
 from database import init_database
+from storage_backup import backup_all
 
 load_dotenv()
 TOKEN = os.getenv('DISCORD_TOKEN')
@@ -33,6 +34,7 @@ async def load_cogs() -> None:
         'welcome',
         'fun_and_utility',
         'heartbeat',
+        'data_management',
     }
     loaded_cogs = set()
 
@@ -123,6 +125,8 @@ async def reload_bot(interaction: discord.Interaction) -> None:
 @bot.event
 async def on_ready() -> None:
     print(f'Bot is online as {bot.user}')
+    # Create startup backup
+    backup_all()
     try:
         synced = await bot.tree.sync()
         print(f'Synced {len(synced)} command(s)')
