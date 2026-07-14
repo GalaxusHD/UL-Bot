@@ -35,7 +35,6 @@ async def load_cogs() -> None:
         'reminders',
         'welcome',
         'fun_and_utility',
-        'heartbeat',
         'data_management',
         'admin_role_management',
     }
@@ -140,61 +139,6 @@ async def reload_bot(interaction: discord.Interaction) -> None:
         status_lines.insert(0, '✅ Reload erfolgreich abgeschlossen:')
 
     await interaction.followup.send('\n'.join(status_lines), ephemeral=True)
-
-
-@bot.tree.command(name='top_reload', description='Lade XP-Leaderboards neu und berechne Top-Nutzer neu')
-@app_commands.default_permissions(administrator=True)
-async def top_reload(interaction: discord.Interaction) -> None:
-    if interaction.guild is None:
-        await interaction.response.send_message('❌ Dieser Befehl ist nur auf Servern verfügbar.', ephemeral=True)
-        return
-    if not _has_admin_permission(interaction):
-        await interaction.response.send_message('❌ Du brauchst Administrator-Rechte!', ephemeral=True)
-        return
-
-    await interaction.response.defer(ephemeral=True)
-    
-    try:
-        # Recalculate XP leaderboards by refreshing from database
-        with sqlite3.connect(DB_FILE) as conn:
-            # Get top text users
-            text_users = conn.execute(
-                '''
-                SELECT user_id, text_xp
-                FROM user_xp
-                WHERE guild_id = ?
-                ORDER BY text_xp DESC
-                LIMIT 10
-                ''',
-                (interaction.guild.id,),
-            ).fetchall()
-            
-            # Get top voice users
-            voice_users = conn.execute(
-                '''
-                SELECT user_id, voice_xp
-                FROM user_xp
-                WHERE guild_id = ?
-                ORDER BY voice_xp DESC
-                LIMIT 10
-                ''',
-                (interaction.guild.id,),
-            ).fetchall()
-        
-        text_count = len(text_users)
-        voice_count = len(voice_users)
-        
-        await interaction.followup.send(
-            f'✅ XP-Leaderboards neu berechnet!\n'
-            f'📊 Text-XP Top 10: {text_count} Einträge\n'
-            f'🎤 Voice-XP Top 10: {voice_count} Einträge',
-            ephemeral=True,
-        )
-    except Exception as e:
-        await interaction.followup.send(
-            f'❌ Fehler beim Neuladen der Leaderboards: {e}',
-            ephemeral=True,
-        )
 
 
 @bot.event
