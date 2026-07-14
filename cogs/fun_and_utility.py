@@ -15,7 +15,6 @@ from database import DB_FILE
 TEXT_XP_PER_MESSAGE = 1
 VOICE_XP_PER_MINUTE = 1
 TEXT_XP_COOLDOWN_SECONDS = 30
-TOP_LIMIT = 10
 LOG_EMBED_MAX_LINES = 60
 
 MAGIC_8_BALL_ANSWERS = [
@@ -38,7 +37,6 @@ PUBLIC_COMMAND_EXPLANATIONS_DEFAULTS = [
     ('/geburtstag', 'Trage einen Geburtstag ein'),
     ('/würfel [seiten]', 'Würfle einen Würfel mit der angegebenen Anzahl von Seiten'),
     ('/8ball', 'Stelle eine Frage und erhalte eine mystische deutsche Antwort'),
-    ('/top', 'Zeige die Top 10 der aktivsten Nutzer in Text- und Sprachchat an'),
 ]
 
 ADMIN_COMMAND_EXPLANATIONS_DEFAULTS = [
@@ -57,6 +55,8 @@ ADMIN_COMMAND_EXPLANATIONS_DEFAULTS = [
     ('/welcome_remove', 'Lösche ein Welcome-Setup'),
     ('/moveall', 'Verschiebe alle User aus deinem aktuellen Voice-Channel in einen anderen'),
     ('/reload', 'Lade Cogs neu, synchronisiere Befehle und starte Birthday-Tasks neu'),
+    ('/admin', 'Verwalte Admin-Rollen für den Server (add/remove)'),
+    ('/admin_liste', 'Zeige alle Admin-Rollen des Servers an'),
     ('/erklärung_edit', 'Bearbeite die Beschreibung eines öffentlichen Befehls'),
     ('/erklärung_remove', 'Lösche einen öffentlichen Befehl aus der Liste'),
     ('/erklärungadmin', 'Zeige die Erklärung für einen Admin-Befehl an'),
@@ -67,6 +67,10 @@ ADMIN_COMMAND_EXPLANATIONS_DEFAULTS = [
     ('/log_liste', 'Zeige alle Log-Einträge an'),
     ('/log_edit', 'Bearbeite einen Log-Eintrag'),
     ('/log_remove', 'Lösche einen Log-Eintrag'),
+    ('/backup_all', 'Backup aller Daten (Geburtstage, Reminders, Texte, Logs, Admin-Rollen)'),
+    ('/backup_einzeln', 'Backup einzelner Systeme auswählen'),
+    ('/restore_all', 'Restore aller Daten aus Backups'),
+    ('/restore_einzeln', 'Restore einzelner Systeme auswählen'),
 ]
 
 AUTOCOMPLETE_LIMIT = 25
@@ -144,21 +148,6 @@ class FunAndUtility(commands.Cog):
             )
             conn.commit()
         return gained
-
-    async def _build_top_lines(self, guild: discord.Guild, rows: list[sqlite3.Row], xp_column: str) -> str:
-        if not rows:
-            return 'Noch keine Daten.'
-        lines: list[str] = []
-        for index, row in enumerate(rows, start=1):
-            member_name = await self._resolve_member_name(guild, int(row['user_id']))
-            lines.append(f'`#{index}` {member_name} — **{int(row[xp_column])} XP**')
-        return '\n'.join(lines)
-
-    @staticmethod
-    def _rank_line(rank: int | None, xp: int) -> str:
-        if rank is None:
-            return f'Nicht gerankt — **{xp} XP**'
-        return f'`#{rank}` — **{xp} XP**'
 
     @staticmethod
     def _normalize_command_name(command: str) -> str:
@@ -268,95 +257,6 @@ class FunAndUtility(commands.Cog):
             return description
         return f'{description[:EMBED_DESCRIPTION_LIMIT - 3]}...'
 
-    async def _build_top_embed(self, interaction: discord.Interaction) -> discord.Embed:
-        assert interaction.guild is not None
-        requester_id = interaction.user.id
-        with sqlite3.connect(DB_FILE) as conn:
-            conn.row_factory = sqlite3.Row
-            text_rows = conn.execute(
-                '''
-                SELECT user_id, text_xp
-                FROM user_xp
-                WHERE guild_id = ? AND text_xp > 0
-                ORDER BY text_xp DESC, user_id ASC
-                LIMIT ?
-                ''',
-                (interaction.guild.id, TOP_LIMIT),
-            ).fetchall()
-            voice_rows = conn.execute(
-                '''
-                SELECT user_id, voice_xp
-                FROM user_xp
-                WHERE guild_id = ? AND voice_xp > 0
-                ORDER BY voice_xp DESC, user_id ASC
-                LIMIT ?
-                ''',
-                (interaction.guild.id, TOP_LIMIT),
-            ).fetchall()
-            own_row = conn.execute(
-                '''
-                SELECT text_xp, voice_xp
-                FROM user_xp
-                WHERE guild_id = ? AND user_id = ?
-                LIMIT 1
-                ''',
-                (interaction.guild.id, requester_id),
-            ).fetchone()
-
-            own_text_xp = int(own_row['text_xp']) if own_row is not None else 0
-            own_voice_xp = int(own_row['voice_xp']) if own_row is not None else 0
-            text_rank: int | None = None
-            voice_rank: int | None = None
-
-            if own_text_xp > 0:
-                text_rank = int(
-                    conn.execute(
-                        '''
-                        SELECT COUNT(*)
-                        FROM user_xp
-                        WHERE guild_id = ? AND text_xp > ?
-                        ''',
-                        (interaction.guild.id, own_text_xp),
-                    ).fetchone()[0]
-                ) + 1
-            if own_voice_xp > 0:
-                voice_rank = int(
-                    conn.execute(
-                        '''
-                        SELECT COUNT(*)
-                        FROM user_xp
-                        WHERE guild_id = ? AND voice_xp > ?
-                        ''',
-                        (interaction.guild.id, own_voice_xp),
-                    ).fetchone()[0]
-                ) + 1
-
-        embed = discord.Embed(
-            title='🏆 XP Leaderboard',
-            color=discord.Colour.orange(),
-        )
-        embed.add_field(
-            name='💬 Top 10 Text Chat',
-            value=await self._build_top_lines(interaction.guild, text_rows, 'text_xp'),
-            inline=False,
-        )
-        embed.add_field(
-            name='🎙️ Top 10 Voice Chat',
-            value=await self._build_top_lines(interaction.guild, voice_rows, 'voice_xp'),
-            inline=False,
-        )
-        embed.add_field(
-            name='Dein Text-Rang',
-            value=self._rank_line(text_rank, own_text_xp),
-            inline=False,
-        )
-        embed.add_field(
-            name='Dein Voice-Rang',
-            value=self._rank_line(voice_rank, own_voice_xp),
-            inline=False,
-        )
-        return embed
-
     async def _post_log_list(self, interaction: discord.Interaction) -> None:
         assert interaction.guild is not None
         with sqlite3.connect(DB_FILE) as conn:
@@ -422,14 +322,6 @@ class FunAndUtility(commands.Cog):
         )
         embed.add_field(name='❓ Frage', value=clean_question, inline=False)
         embed.add_field(name='🔮 Antwort', value=answer, inline=False)
-        await interaction.response.send_message(embed=embed)
-
-    @app_commands.command(name='top', description='Zeigt die Top 10 Text- und Voice-XP')
-    async def top_command(self, interaction: discord.Interaction) -> None:
-        if interaction.guild is None:
-            await interaction.response.send_message('❌ Dieser Befehl ist nur auf Servern verfügbar.', ephemeral=True)
-            return
-        embed = await self._build_top_embed(interaction)
         await interaction.response.send_message(embed=embed)
 
     @app_commands.command(name='erklärung', description='Zeige die Erklärung für einen öffentlichen Befehl')
