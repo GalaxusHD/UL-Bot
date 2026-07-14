@@ -20,6 +20,7 @@ TABLE_INFO_SQL = {
     'admin_logs': 'PRAGMA table_info(admin_logs)',
     'public_command_explanations': 'PRAGMA table_info(public_command_explanations)',
     'admin_command_explanations': 'PRAGMA table_info(admin_command_explanations)',
+    'admin_roles': 'PRAGMA table_info(admin_roles)',
 }
 ALTER_COLUMN_SQL = {
     ('birthdays', 'username', "TEXT NOT NULL DEFAULT '@unknown'"):
@@ -266,6 +267,16 @@ def init_database() -> None:
         '''
     )
 
+    cursor.execute(
+        '''
+        CREATE TABLE IF NOT EXISTS admin_roles (
+            guild_id INTEGER NOT NULL,
+            role_id INTEGER NOT NULL,
+            PRIMARY KEY (guild_id, role_id)
+        )
+        '''
+    )
+
     cursor.execute('CREATE INDEX IF NOT EXISTS idx_birthdays_date ON birthdays (month, day)')
     cursor.execute('CREATE INDEX IF NOT EXISTS idx_birthdays_lookup ON birthdays (guild_id, user_id)')
     cursor.execute('CREATE INDEX IF NOT EXISTS idx_text_messages_guild_title ON text_messages (guild_id, title)')
@@ -284,6 +295,7 @@ def init_database() -> None:
     cursor.execute('CREATE INDEX IF NOT EXISTS idx_admin_logs_guild_lookup ON admin_logs (guild_id, id)')
     cursor.execute('CREATE INDEX IF NOT EXISTS idx_public_command_explanations_command ON public_command_explanations (command)')
     cursor.execute('CREATE INDEX IF NOT EXISTS idx_admin_command_explanations_command ON admin_command_explanations (command)')
+    cursor.execute('CREATE INDEX IF NOT EXISTS idx_admin_roles_lookup ON admin_roles (guild_id)')
 
     conn.commit()
     conn.close()
