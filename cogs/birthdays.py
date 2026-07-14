@@ -9,6 +9,7 @@ from discord import app_commands
 from discord.ext import commands, tasks
 
 from database import DB_FILE
+from admin_roles import has_admin_role
 
 DEFAULT_TIMEZONE = 'Europe/Berlin'
 MIN_BIRTH_YEAR = 1900
@@ -31,6 +32,16 @@ MONTH_NAMES = {
     12: 'Dezember',
 }
 MAX_STORAGE_ID_ATTEMPTS = 100
+
+BIRTHDAY_TUTORIAL = (
+    '**📋 Anleitung: Geburtstag hinzufügen oder anpassen**\n'
+    'Du willst deinen Geburtstag hinzufügen oder anpassen?\n'
+    'Nutze den Befehl `/geburtstag` und fülle das Formular aus.\n\n'
+    '✨ Tipps:\n'
+    '• Du kannst optional deinen echten Namen angeben\n'
+    '• Das Geburtsjahr ist optional (wird zur Berechnung des Alters genutzt)\n'
+    '• Admin können mit `/geburtstag [Benutzer]` auch für andere eintragen'
+)
 
 
 class BirthdayModal(discord.ui.Modal, title='Geburtstag eintragen'):
@@ -118,6 +129,22 @@ class Birthdays(commands.Cog):
         if not self.daily_scheduler.is_running():
             self.daily_scheduler.start()
 
+    def _has_admin_permission(self, interaction: discord.Interaction) -> bool:
+        """Check if user has admin role or Discord administrator permission."""
+        if interaction.guild is None:
+            return False
+        
+        if not isinstance(interaction.user, discord.Member):
+            return False
+        
+        # Check Discord administrator permission
+        if interaction.user.guild_permissions.administrator:
+            return True
+        
+        # Check custom admin roles
+        user_role_ids = [role.id for role in interaction.user.roles]
+        return has_admin_role(interaction.guild.id, interaction.user.id, user_role_ids)
+
     @app_commands.command(name='geburtstag', description='Trage einen Geburtstag ein')
     @app_commands.describe(user='Optional: Benutzer (nur Admins)')
     async def geburtstag(self, interaction: discord.Interaction, user: discord.Member | None = None) -> None:
@@ -125,7 +152,7 @@ class Birthdays(commands.Cog):
             await interaction.response.send_message('❌ Dieser Befehl ist nur auf Servern verfügbar.', ephemeral=True)
             return
 
-        if user is not None and not interaction.user.guild_permissions.administrator:
+        if user is not None and not self._has_admin_permission(interaction):
             await interaction.response.send_message('❌ Du brauchst Administrator-Rechte!', ephemeral=True)
             return
 
@@ -136,13 +163,12 @@ class Birthdays(commands.Cog):
         )
 
     @app_commands.command(name='geburtstag_entfernen', description='Entferne einen Geburtstag aus der Liste')
-    @app_commands.default_permissions(administrator=True)
     @app_commands.describe(user='Der Benutzer zum Entfernen')
     async def remove_birthday(self, interaction: discord.Interaction, user: discord.Member) -> None:
         if interaction.guild is None:
             await interaction.response.send_message('❌ Dieser Befehl ist nur auf Servern verfügbar.', ephemeral=True)
             return
-        if not interaction.user.guild_permissions.administrator:
+        if not self._has_admin_permission(interaction):
             await interaction.response.send_message('❌ Du brauchst Administrator-Rechte!', ephemeral=True)
             return
 
@@ -161,17 +187,19 @@ class Birthdays(commands.Cog):
         await interaction.response.send_message(f'✅ Geburtstag für {user.mention} entfernt.', ephemeral=True)
 
     @app_commands.command(name='geburtstagsliste', description='Zeige die Geburtstagsliste')
-    @app_commands.default_permissions(administrator=True)
     async def geburtstagsliste(self, interaction: discord.Interaction) -> None:
         if interaction.guild is None:
             await interaction.response.send_message('❌ Dieser Befehl ist nur auf Servern verfügbar.', ephemeral=True)
             return
-        if not interaction.user.guild_permissions.administrator:
+        if not self._has_admin_permission(interaction):
             await interaction.response.send_message('❌ Du brauchst Administrator-Rechte!', ephemeral=True)
             return
 
         embed = self.build_birthday_embed(interaction.guild)
         message = await interaction.channel.send(embed=embed) if interaction.channel else None
+        
+        # Send tutorial message
+        await interaction.channel.send(BIRTHDAY_TUTORIAL) if interaction.channel else None
 
         with self._conn() as conn:
             conn.execute(
@@ -193,13 +221,12 @@ class Birthdays(commands.Cog):
         await interaction.response.send_message('✅ Geburtstagsliste wurde erstellt/aktualisiert.', ephemeral=True)
 
     @app_commands.command(name='geburtstagsrolle', description='Setze die Geburtstagsrolle')
-    @app_commands.default_permissions(administrator=True)
     @app_commands.describe(role='Rolle für Geburtstagskinder')
     async def geburtstagsrolle(self, interaction: discord.Interaction, role: discord.Role) -> None:
         if interaction.guild is None:
             await interaction.response.send_message('❌ Dieser Befehl ist nur auf Servern verfügbar.', ephemeral=True)
             return
-        if not interaction.user.guild_permissions.administrator:
+        if not self._has_admin_permission(interaction):
             await interaction.response.send_message('❌ Du brauchst Administrator-Rechte!', ephemeral=True)
             return
 
@@ -217,12 +244,11 @@ class Birthdays(commands.Cog):
         await interaction.response.send_message(f'✅ Geburtstagsrolle gesetzt: {role.mention}', ephemeral=True)
 
     @app_commands.command(name='geburtstag_check', description='Prüfe manuell, ob heute Geburtstage anstehen')
-    @app_commands.default_permissions(administrator=True)
     async def geburtstag_check(self, interaction: discord.Interaction) -> None:
         if interaction.guild is None:
             await interaction.response.send_message('❌ Dieser Befehl ist nur auf Servern verfügbar.', ephemeral=True)
             return
-        if not interaction.user.guild_permissions.administrator:
+        if not self._has_admin_permission(interaction):
             await interaction.response.send_message('❌ Du brauchst Administrator-Rechte!', ephemeral=True)
             return
 
